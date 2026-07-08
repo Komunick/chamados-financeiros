@@ -17,9 +17,13 @@ Os dados cadastrados são **padronizados**: placa no modelo brasileiro
 CNH com 11 números — os campos numéricos só aceitam números.
 
 Abas: **Chamados** (em andamento), **Histórico** (finalizados e
-cancelados), **Relatórios** (todas as compras agrupadas por dia com o
-**valor total do dia** — visível apenas para quem visualiza os chamados:
-financeiro/admin) e **Notificações**. O financeiro é avisado na **barra de
+cancelados), **Relatórios** e **Notificações**. Os **Relatórios** (visíveis
+apenas para quem visualiza os chamados: financeiro/admin) trazem o **total
+das viagens e o total das compras**, três listas — **só viagens**, **só
+compras** e a **combinada por dia** — além do **valor do dia** e do **valor
+futuro** (com destaque para os **próximos 7 dias**): compras contam no dia
+da abertura e viagens na **data da viagem**, então viagens agendadas
+aparecem marcadas como **futuras**. O financeiro é avisado na **barra de
 tarefas do Windows apenas com as notificações novas** (cada aviso aparece uma
 única vez).
 
@@ -103,9 +107,12 @@ opencode\
    sem 70/30).
 2. **Financeiro** recebe a notificação, faz a compra e marca **Compra paga**
    — o chamado é finalizado.
-3. Todas as compras aparecem em **Relatórios**, agrupadas por dia com o
-   **valor total de cada dia** (compras canceladas não somam). A aba é
-   restrita a financeiro/admin.
+3. Viagens e compras aparecem em **Relatórios** (aba restrita a
+   financeiro/admin): totais gerais de cada tipo, lista só de viagens (com
+   as **futuras** marcadas pela data da viagem), lista só de compras e a
+   lista combinada por dia com o **valor total do dia** e os subtotais de
+   viagens e compras. Os cartões do topo mostram o **valor do dia** e o
+   **valor futuro dos próximos 7 dias**. Chamados cancelados não somam.
 
 Chamados finalizados ou cancelados saem da lista principal e ficam na aba
 **Histórico**, com busca e filtro.

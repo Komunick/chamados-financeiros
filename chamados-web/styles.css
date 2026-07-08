@@ -254,6 +254,7 @@ table.lista tbody tr:hover { background: var(--primario-fundo); }
 .chip-pago { background: var(--verde-fundo); color: var(--verde); }
 .chip-tipo-viagem { background: transparent; color: var(--primario); }
 .chip-tipo-compra { background: transparent; color: var(--amarelo); }
+.chip-futuro { background: var(--amarelo-marca-fundo); color: var(--amarelo); border-style: dashed; }
 
 /* ---------- abas ---------- */
 .abas { display: flex; gap: 2px; border-bottom: 1px solid var(--tinta); margin: 20px 0 22px; flex-wrap: wrap; }
@@ -294,6 +295,7 @@ table.lista tbody tr:hover { background: var(--primario-fundo); }
   padding: 5px 14px;
   border-radius: 2px;
 }
+.relatorio-detalhe { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; }
 
 /* ---------- anexos ---------- */
 .anexos-grupos { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }

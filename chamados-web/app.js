@@ -11,6 +11,7 @@
     chamados: [],
     notificacoes: [],
     abaDetalhe: 'financeiro',
+    abaRelatorio: 'dia',
     filtroStatus: '',
     filtroBusca: '',
     filtroStatusHist: '',
@@ -410,69 +411,159 @@
 
   // ------------------------------------------------------------------ relatórios (financeiro/admin)
   async function renderRelatorios(cont) {
-    const r = await api('GET', '/api/relatorios/compras');
+    const r = await api('GET', '/api/relatorios/movimento');
     cont.innerHTML = '';
+    const itens = r.itens || [];
 
-    const compras = r.compras || [];
-    const validas = compras.filter((c) => c.status !== 'cancelado');
-    const totalGeral = validas.reduce((s, c) => s + c.valorTotalCent, 0);
-    const hoje = new Date().toLocaleDateString('pt-BR');
-    const totalHoje = validas
-      .filter((c) => new Date(c.criadoEm).toLocaleDateString('pt-BR') === hoje)
-      .reduce((s, c) => s + c.valorTotalCent, 0);
+    const pad = (n) => String(n).padStart(2, '0');
+    const isoLocal = (dt) => dt.getFullYear() + '-' + pad(dt.getMonth() + 1) + '-' + pad(dt.getDate());
+    const hojeIso = isoLocal(new Date());
+    const lim7Iso = isoLocal(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+    // Data de referência: compra conta no dia da abertura; viagem, na data da
+    // viagem (viagens agendadas para depois de hoje são as "futuras").
+    const dataRef = (c) => (c.tipo === 'compra' || !c.dataViagem) ? isoLocal(new Date(c.criadoEm)) : c.dataViagem;
+    const ehFuturo = (c) => dataRef(c) > hojeIso;
+    const soma = (l) => l.filter((c) => c.status !== 'cancelado').reduce((s, c) => s + c.valorTotalCent, 0);
+
+    const viagens = itens.filter((c) => c.tipo !== 'compra');
+    const compras = itens.filter((c) => c.tipo === 'compra');
+    const doDia = itens.filter((c) => dataRef(c) === hojeIso);
+    const futuras = itens.filter(ehFuturo);
+    const futuras7 = futuras.filter((c) => dataRef(c) <= lim7Iso);
+    const somaFuturo7 = soma(futuras7);
+    const somaFuturoTotal = soma(futuras);
+
+    const cardResumo = (rotulo, valor, obs, destaque) =>
+      el('div', { class: 'valor-cartao' + (destaque ? ' destaque' : '') },
+        el('div', { class: 'rotulo' }, rotulo),
+        el('div', { class: 'valor' }, valor),
+        obs ? el('div', { class: 'obs' }, obs) : null);
 
     const resumo = el('div', { class: 'valores' },
-      el('div', { class: 'valor-cartao destaque' },
-        el('div', { class: 'rotulo' }, 'Total de hoje (' + hoje + ')'),
-        el('div', { class: 'valor' }, fmtMoeda(totalHoje))),
-      el('div', { class: 'valor-cartao' },
-        el('div', { class: 'rotulo' }, 'Total geral de compras'),
-        el('div', { class: 'valor' }, fmtMoeda(totalGeral))),
-      el('div', { class: 'valor-cartao' },
-        el('div', { class: 'rotulo' }, 'Compras registradas'),
-        el('div', { class: 'valor' }, String(compras.length))));
+      cardResumo('Valor do dia (' + fmtDataViagem(hojeIso) + ')', fmtMoeda(soma(doDia)),
+        'Compras de hoje + viagens com data de hoje.', true),
+      cardResumo('Valor futuro — próximos 7 dias', fmtMoeda(somaFuturo7),
+        somaFuturoTotal > somaFuturo7
+          ? 'Futuro total (todas as datas): ' + fmtMoeda(somaFuturoTotal)
+          : (futuras.length ? futuras.length + ' viagem(ns) futura(s) agendada(s).' : 'Nenhuma viagem futura agendada.'), true),
+      cardResumo('Total geral — viagens', fmtMoeda(soma(viagens)), viagens.length + ' chamado(s) de viagem.'),
+      cardResumo('Total geral — compras', fmtMoeda(soma(compras)), compras.length + ' compra(s).'));
 
     const cartao = el('div', { class: 'cartao' },
-      el('div', { class: 'linha-topo' }, el('h2', null, 'Relatório de compras')),
-      el('p', { class: 'mudo' }, 'Todas as compras agrupadas por dia, com o valor total de cada dia. Compras canceladas aparecem na lista mas não somam nos totais.'),
+      el('div', { class: 'linha-topo' }, el('h2', null, 'Relatórios')),
+      el('p', { class: 'mudo' },
+        'Compras contam no dia da abertura; viagens contam na data da viagem — as agendadas para depois de hoje aparecem como futuras. Chamados cancelados aparecem nas listas, mas não somam nos totais.'),
       resumo);
     cont.append(cartao);
 
-    if (!compras.length) {
-      cartao.append(el('div', { class: 'vazio' }, 'Nenhuma compra registrada ainda. Abra um chamado do tipo Compra.'));
+    if (!itens.length) {
+      cartao.append(el('div', { class: 'vazio' }, 'Nenhum chamado registrado ainda.'));
       return;
     }
 
-    // Agrupa por dia (data local de abertura), mais recente primeiro.
+    // ---- sub-abas: combinada por dia · só viagens · só compras ----
+    const barra = el('div', { class: 'abas' });
+    const corpo = el('div');
+    for (const [k, rot] of [['dia', 'Por dia (viagens + compras)'], ['viagens', 'Viagens'], ['compras', 'Compras']]) {
+      barra.append(el('button', {
+        class: 'aba' + (state.abaRelatorio === k ? ' ativa' : ''),
+        onclick: () => { state.abaRelatorio = k; renderRota(); },
+      }, rot));
+    }
+    cartao.append(barra, corpo);
+
+    const chipFutura = () => el('span', { class: 'chip chip-futuro' }, 'Futura');
+
+    const linhaItem = (c, cols) => {
+      const tr = el('tr', { onclick: () => { location.hash = '#/chamado/' + c.id; } });
+      for (const col of cols) tr.append(el('td', null, col));
+      return tr;
+    };
+    const montarTabela = (cabecalhos, linhas) => {
+      const t = el('table', { class: 'lista' },
+        el('thead', null, el('tr', null, ...cabecalhos.map((h) => el('th', null, h)))));
+      const tb = el('tbody');
+      for (const l of linhas) tb.append(l);
+      t.append(tb);
+      return el('div', { class: 'tabela-envolta' }, t);
+    };
+
+    if (state.abaRelatorio === 'viagens') {
+      // ---- lista só de viagens (futuras primeiro, marcadas) ----
+      const lista = viagens.slice().sort((a, b) => (dataRef(a) < dataRef(b) ? 1 : -1));
+      corpo.append(el('div', { class: 'relatorio-dia-topo' },
+        el('h3', null, 'Viagens'),
+        el('div', { class: 'relatorio-total' }, 'Total: ' + fmtMoeda(soma(viagens)))));
+      if (!lista.length) { corpo.append(el('div', { class: 'vazio' }, 'Nenhuma viagem registrada.')); return; }
+      corpo.append(montarTabela(
+        ['Nº', 'Data da viagem', 'Rota', 'Solicitante', 'Veículo', 'Condutor', 'Valor', 'Status'],
+        lista.map((c) => linhaItem(c, [
+          el('strong', null, c.id),
+          el('span', null, fmtDataViagem(c.dataViagem), ehFuturo(c) ? ' ' : '', ehFuturo(c) ? chipFutura() : ''),
+          c.rota || '—',
+          c.solicitante,
+          c.descricao,
+          c.condutor || '—',
+          fmtMoeda(c.valorTotalCent),
+          chipStatus(c.status),
+        ]))));
+      return;
+    }
+
+    if (state.abaRelatorio === 'compras') {
+      // ---- lista só de compras ----
+      corpo.append(el('div', { class: 'relatorio-dia-topo' },
+        el('h3', null, 'Compras'),
+        el('div', { class: 'relatorio-total' }, 'Total: ' + fmtMoeda(soma(compras)))));
+      if (!compras.length) { corpo.append(el('div', { class: 'vazio' }, 'Nenhuma compra registrada.')); return; }
+      corpo.append(montarTabela(
+        ['Nº', 'Aberto em', 'Solicitante', 'Descrição', 'Fornecedor', 'Valor', 'Status'],
+        compras.map((c) => linhaItem(c, [
+          el('strong', null, c.id),
+          fmtData(c.criadoEm),
+          c.solicitante,
+          c.descricao,
+          c.fornecedor || '—',
+          fmtMoeda(c.valorTotalCent),
+          chipStatus(c.status),
+        ]))));
+      return;
+    }
+
+    // ---- combinada: viagens + compras agrupadas por dia (futuros primeiro) ----
     const grupos = new Map();
-    for (const c of compras) {
-      const dia = new Date(c.criadoEm).toLocaleDateString('pt-BR');
+    for (const c of itens) {
+      const dia = dataRef(c);
       if (!grupos.has(dia)) grupos.set(dia, []);
       grupos.get(dia).push(c);
     }
-
-    for (const [dia, itens] of grupos) {
-      const totalDia = itens.filter((c) => c.status !== 'cancelado').reduce((s, c) => s + c.valorTotalCent, 0);
-      const tabela = el('table', { class: 'lista' },
-        el('thead', null, el('tr', null,
-          ...['Nº', 'Hora', 'Solicitante', 'Descrição', 'Fornecedor', 'Valor', 'Status'].map((h) => el('th', null, h)))));
-      const tbody = el('tbody');
-      for (const c of itens) {
-        tbody.append(el('tr', { onclick: () => { location.hash = '#/chamado/' + c.id; } },
-          el('td', null, el('strong', null, c.id)),
-          el('td', null, new Date(c.criadoEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })),
-          el('td', null, c.solicitante),
-          el('td', null, c.descricao),
-          el('td', null, c.fornecedor || '—'),
-          el('td', null, fmtMoeda(c.valorTotalCent)),
-          el('td', null, chipStatus(c.status))));
-      }
-      tabela.append(tbody);
-      cartao.append(el('div', { class: 'relatorio-dia' },
+    const dias = [...grupos.keys()].sort().reverse();
+    for (const dia of dias) {
+      const doGrupo = grupos.get(dia);
+      const somaViagensDia = soma(doGrupo.filter((c) => c.tipo !== 'compra'));
+      const somaComprasDia = soma(doGrupo.filter((c) => c.tipo === 'compra'));
+      const titulo = el('h3', null, fmtDataViagem(dia),
+        dia === hojeIso ? el('span', { class: 'mudo' }, ' — hoje') : '',
+        dia > hojeIso ? ' ' : '', dia > hojeIso ? chipFutura() : '');
+      corpo.append(el('div', { class: 'relatorio-dia' },
         el('div', { class: 'relatorio-dia-topo' },
-          el('h3', null, dia),
-          el('div', { class: 'relatorio-total' }, 'Total do dia: ' + fmtMoeda(totalDia))),
-        el('div', { class: 'tabela-envolta' }, tabela)));
+          titulo,
+          el('div', { class: 'relatorio-detalhe' },
+            (somaViagensDia && somaComprasDia)
+              ? el('span', { class: 'mudo' }, 'Viagens ' + fmtMoeda(somaViagensDia) + ' · Compras ' + fmtMoeda(somaComprasDia) + '  ')
+              : '',
+            el('span', { class: 'relatorio-total' }, 'Total do dia: ' + fmtMoeda(somaViagensDia + somaComprasDia)))),
+        montarTabela(
+          ['Nº', 'Tipo', 'Solicitante', 'Descrição', 'Rota / Fornecedor', 'Valor', 'Status'],
+          doGrupo.map((c) => linhaItem(c, [
+            el('strong', null, c.id),
+            chipTipo(c.tipo),
+            c.solicitante,
+            c.descricao,
+            (c.tipo === 'compra' ? c.fornecedor : c.rota) || '—',
+            fmtMoeda(c.valorTotalCent),
+            chipStatus(c.status),
+          ])))));
     }
   }
 

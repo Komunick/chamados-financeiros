@@ -684,22 +684,28 @@ rota('POST', '/api/notificacoes/:id/reconhecer', ['financeiro', 'admin'], (ctx) 
 });
 
 // ---- relatórios (apenas quem visualiza os chamados: financeiro/admin) --------
-rota('GET', '/api/relatorios/compras', ['financeiro', 'admin'], (ctx) => {
-  const compras = d.db.chamados
-    .filter((c) => c.tipo === 'compra')
+// Movimento completo: viagens e compras, para o front montar as listas
+// separadas e a combinada por dia.
+rota('GET', '/api/relatorios/movimento', ['financeiro', 'admin'], (ctx) => {
+  const itens = d.db.chamados
     .slice()
     .sort((a, b) => (a.criadoEm < b.criadoEm ? 1 : -1))
     .map((c) => ({
       id: c.id,
+      tipo: c.tipo || 'viagem',
       criadoEm: c.criadoEm,
       solicitante: c.solicitante.nome,
-      descricao: c.compra ? c.compra.descricao : '',
-      fornecedor: c.compra ? c.compra.fornecedor : '',
+      descricao: c.tipo === 'compra'
+        ? (c.compra ? c.compra.descricao : '')
+        : (c.veiculo ? (c.veiculo.placa + ' · ' + c.veiculo.modelo) : ''),
+      fornecedor: (c.tipo === 'compra' && c.compra) ? c.compra.fornecedor : '',
+      condutor: (c.tipo !== 'compra' && c.condutor) ? c.condutor.nome : '',
+      rota: c.rota || '',
+      dataViagem: c.dataViagem || null,
       valorTotalCent: c.valorTotalCent,
       status: c.status,
-      compraPagaEm: c.compraPagaEm || null,
     }));
-  sendJson(ctx.res, 200, { compras });
+  sendJson(ctx.res, 200, { itens });
 });
 
 // ---- backup ------------------------------------------------------------------
