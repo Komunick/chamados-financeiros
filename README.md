@@ -61,6 +61,7 @@ opencode\
 │   ├── INSTALAR-AUTOINICIO.bat ← servidor sobe sozinho no boot (pede admin)
 │   └── LIBERAR-FIREWALL.bat    ← libera a porta 8090 só para o ZeroTier
 ├── chamados-data\       ← criada sozinha: chamados.json, anexos\, backups\
+├── deploy-linux\        ← instalador p/ rodar numa VM Linux (systemd, porta 8090)
 └── notificador\         ← roda na máquina de QUEM RECEBE os chamados
     ├── notificador.js
     ├── config.json             ← criado na 1ª execução; edite login/senha
