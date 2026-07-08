@@ -1,9 +1,10 @@
 'use strict';
 /*
- * Notificador de Chamados Financeiros — roda na máquina de quem RECEBE os
- * chamados (financeiro) e mostra notificações INSISTENTES na barra de tarefas
- * do Windows (balão que fica na tela + central de notificações), repetindo a
- * cada poucos minutos até alguém marcar a notificação como vista no sistema.
+ * Notificador Brazil Transports — roda na máquina de quem RECEBE os chamados
+ * (financeiro) e mostra na barra de tarefas do Windows APENAS as notificações
+ * NOVAS: cada aviso aparece uma única vez (balão + central de notificações),
+ * sem repetição. O que já foi avisado fica registrado em avisadas.json, então
+ * reiniciar o notificador não reexibe avisos antigos.
  *
  * Node puro, sem dependências. O balão é exibido via PowerShell
  * (Windows.UI.Notifications, nativo do Windows 10/11).
@@ -13,8 +14,7 @@
  *     "servidor": "http://10.13.47.131:8090",
  *     "login": "usuario-financeiro",
  *     "senha": "senha",
- *     "intervaloSegundos": 30,   // frequência de consulta ao servidor
- *     "repetirMinutos": 5        // re-exibe o aviso enquanto não for visto
+ *     "intervaloSegundos": 30    // frequência de consulta ao servidor
  *   }
  */
 const fs = require('fs');
@@ -27,6 +27,7 @@ const DIR = __dirname;
 const CONFIG_FILE = path.join(DIR, 'config.json');
 const LOG_FILE = path.join(DIR, 'notificador.log');
 const PS1_FILE = path.join(DIR, 'toast-tmp.ps1');
+const AVISADAS_FILE = path.join(DIR, 'avisadas.json'); // ids já exibidos (não repetir)
 
 function log(msg) {
   const linha = new Date().toLocaleString('pt-BR') + '  ' + msg;
@@ -49,7 +50,6 @@ if (!fs.existsSync(CONFIG_FILE)) {
     login: 'financeiro',
     senha: 'TROQUE-AQUI',
     intervaloSegundos: 30,
-    repetirMinutos: 5,
   };
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(exemplo, null, 2));
   log('config.json criado. Edite o arquivo com o endereço do servidor e o login do financeiro e rode de novo.');
@@ -63,8 +63,21 @@ if (!cfg.servidor || !cfg.login || !cfg.senha || cfg.senha === 'TROQUE-AQUI') {
   process.exit(1);
 }
 const INTERVALO = Math.max(10, parseInt(cfg.intervaloSegundos, 10) || 30) * 1000;
-const REPETIR = Math.max(1, parseInt(cfg.repetirMinutos, 10) || 5) * 60 * 1000;
 const BASE = String(cfg.servidor).replace(/\/+$/, '');
+
+// ---------------------------------------------------------------------------
+// Memória do que já foi avisado (para exibir cada notificação só UMA vez,
+// mesmo depois de reiniciar o notificador).
+// ---------------------------------------------------------------------------
+let avisadas = null; // null = primeira execução (sem arquivo): não reavisar o passado
+try {
+  avisadas = new Set(JSON.parse(fs.readFileSync(AVISADAS_FILE, 'utf8')));
+} catch (e) { /* sem arquivo ainda */ }
+
+function salvarAvisadas() {
+  try { fs.writeFileSync(AVISADAS_FILE, JSON.stringify([...avisadas])); }
+  catch (e) { log('Falha ao salvar avisadas.json: ' + e.message); }
+}
 
 // ---------------------------------------------------------------------------
 // HTTP simples (sem dependências).
@@ -157,7 +170,6 @@ function mostrarToast(titulo, linha1, linha2) {
 // Laço principal.
 // ---------------------------------------------------------------------------
 let token = '';
-const ultimoAviso = new Map(); // idNotificacao -> timestamp do último balão
 
 async function entrar() {
   const r = await requisicao('POST', '/api/auth/login', { login: cfg.login, senha: cfg.senha });
@@ -179,28 +191,42 @@ async function verificar() {
   if (r.status !== 200) throw new Error('servidor respondeu ' + r.status + ': ' + (r.json.error || ''));
 
   const pendentes = r.json.notificacoes || [];
-  // Limpa da memória o que já foi visto/resolvido.
-  const idsPendentes = new Set(pendentes.map((n) => n.id));
-  for (const id of ultimoAviso.keys()) if (!idsPendentes.has(id)) ultimoAviso.delete(id);
 
-  const agora = Date.now();
+  // Primeira execução (sem avisadas.json): registra o que já existia sem
+  // exibir balão — só as notificações NOVAS a partir de agora geram aviso.
+  if (avisadas === null) {
+    avisadas = new Set(pendentes.map((n) => n.id));
+    salvarAvisadas();
+    log('Primeira execução: ' + pendentes.length + ' notificação(ões) antiga(s) registrada(s) sem aviso. Só as novas serão exibidas.');
+    return;
+  }
+
   let exibidos = 0;
+  let mudou = false;
   for (const n of pendentes) {
-    const ultimo = ultimoAviso.get(n.id) || 0;
-    if (agora - ultimo < REPETIR) continue;
-    if (exibidos >= 3) break; // no máximo 3 balões por ciclo para não inundar a tela
-    ultimoAviso.set(n.id, agora);
+    if (avisadas.has(n.id)) continue; // já avisada: não repete
+    if (exibidos >= 3) break; // no máximo 3 balões por ciclo; o resto sai no próximo
+    avisadas.add(n.id);
+    mudou = true;
     exibidos += 1;
     const d = n.dados || {};
     const linha1 = n.mensagem || '';
-    const linha2 = 'Marque como visto no sistema para parar os avisos.';
-    log('Aviso: ' + n.id + ' (' + n.tipo + ') — ' + n.titulo);
+    const linha2 = 'Brazil Transports · abra o sistema para ver os detalhes.';
+    log('Aviso novo: ' + n.id + ' (' + n.tipo + ') — ' + n.titulo);
     mostrarToast(n.titulo || ('Chamado ' + (d.chamadoId || '')), linha1, linha2);
   }
+
+  // Tira da memória ids que já foram vistos/resolvidos no sistema (uma
+  // notificação reconhecida nunca volta a ficar pendente).
+  const idsPendentes = new Set(pendentes.map((n) => n.id));
+  for (const id of [...avisadas]) {
+    if (!idsPendentes.has(id)) { avisadas.delete(id); mudou = true; }
+  }
+  if (mudou) salvarAvisadas();
 }
 
-log('Notificador iniciado. Servidor: ' + BASE + ' · consulta a cada ' + (INTERVALO / 1000) +
-  's · repete avisos a cada ' + (REPETIR / 60000) + ' min enquanto não forem vistos.');
+log('Notificador Brazil Transports iniciado. Servidor: ' + BASE + ' · consulta a cada ' + (INTERVALO / 1000) +
+  's · cada notificação NOVA é exibida uma única vez.');
 
 let falhasSeguidas = 0;
 async function ciclo() {

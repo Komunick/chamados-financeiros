@@ -1,6 +1,6 @@
 'use strict';
 /*
- * Chamados Financeiros — front-end (HTML/CSS/JS puro, sem dependências).
+ * Brazil Transports — Chamados Financeiros — front-end (HTML/CSS/JS puro).
  * Fala com o servidor via /api/* e recebe atualizações em tempo real por SSE.
  */
 (function () {
@@ -13,6 +13,8 @@
     abaDetalhe: 'financeiro',
     filtroStatus: '',
     filtroBusca: '',
+    filtroStatusHist: '',
+    filtroBuscaHist: '',
     sse: null,
   };
 
@@ -42,6 +44,12 @@
     const d = new Date(iso);
     return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   };
+  // 'AAAA-MM-DD' → 'DD/MM/AAAA' (sem fuso: é só texto)
+  const fmtDataViagem = (s) => {
+    if (!s) return '—';
+    const p = String(s).split('-');
+    return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : s;
+  };
   // "1.500,00" / "1500,5" / "1500" → centavos (int) ou null
   function parseMoeda(str) {
     let s = String(str || '').trim().replace(/[R$\s]/g, '');
@@ -58,9 +66,51 @@
     finalizado: 'Finalizado',
     cancelado: 'Cancelado',
   };
+  const STATUS_ATIVOS = ['aberto', 'adiantamento_pago', 'viagem_encerrada'];
+  const STATUS_HISTORICO = ['finalizado', 'cancelado'];
+  const TIPO_LABEL = { viagem: 'Viagem', compra: 'Compra' };
   const chipStatus = (st) => el('span', { class: 'chip chip-' + st }, STATUS_LABEL[st] || st);
+  const chipTipo = (t) => el('span', { class: 'chip chip-tipo-' + (t || 'viagem') }, TIPO_LABEL[t || 'viagem']);
   const ehFinanceiro = () => state.usuario && (state.usuario.papel === 'financeiro' || state.usuario.papel === 'admin');
   const ehAdmin = () => state.usuario && state.usuario.papel === 'admin';
+  const resumoChamado = (c) => c.tipo === 'compra'
+    ? (c.compra ? c.compra.descricao : '')
+    : (c.veiculo ? c.veiculo.placa + ' · ' + c.veiculo.modelo : '');
+
+  // ------------------------------------------------- máscaras (padrão BR)
+  const soDigitos = (s) => String(s || '').replace(/\D/g, '');
+  function mascaraTelefone(d) {
+    d = soDigitos(d).slice(0, 11);
+    if (!d) return '';
+    if (d.length <= 2) return '(' + d;
+    if (d.length <= 6) return '(' + d.slice(0, 2) + ') ' + d.slice(2);
+    if (d.length <= 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6);
+    return '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7);
+  }
+  function mascaraCpf(d) {
+    d = soDigitos(d).slice(0, 11);
+    if (d.length <= 3) return d;
+    if (d.length <= 6) return d.slice(0, 3) + '.' + d.slice(3);
+    if (d.length <= 9) return d.slice(0, 3) + '.' + d.slice(3, 6) + '.' + d.slice(6);
+    return d.slice(0, 3) + '.' + d.slice(3, 6) + '.' + d.slice(6, 9) + '-' + d.slice(9);
+  }
+  function mascaraPlaca(s) {
+    const p = String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 7);
+    // Modelo antigo completo ganha o hífen (ABC-1234); Mercosul fica sem (ABC1D23).
+    if (/^[A-Z]{3}[0-9]{4}$/.test(p)) return p.slice(0, 3) + '-' + p.slice(3);
+    return p;
+  }
+  const placaValida = (s) => {
+    const p = String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return /^[A-Z]{3}[0-9]{4}$/.test(p) || /^[A-Z]{3}[0-9][A-Z][0-9]{2}$/.test(p);
+  };
+  // Liga a máscara a um input (reaplica a cada tecla).
+  function aplicarMascara(input, fn) {
+    input.addEventListener('input', () => {
+      const v = fn(input.value);
+      if (input.value !== v) input.value = v;
+    });
+  }
 
   function toast(msg, tipo, titulo, aoClicar) {
     const t = el('div', { class: 'toast' + (tipo ? ' toast-' + tipo : '') },
@@ -126,7 +176,7 @@
       } else if (dados.tipo === 'notificacao' && ehFinanceiro()) {
         const n = dados.notificacao;
         tocarAlerta();
-        toast(n.mensagem, 'notif', '🔔 ' + n.titulo, () => { location.hash = '#/chamado/' + n.chamadoId; });
+        toast(n.mensagem, 'notif', n.titulo, () => { location.hash = '#/chamado/' + n.chamadoId; });
         tentarNotificacaoNavegador(n);
         atualizarSino();
       }
@@ -191,11 +241,13 @@
     const nav = $('#topo-nav');
     nav.innerHTML = '';
     const links = [
-      ['#/chamados', '📋 Chamados'],
-      ['#/novo', '➕ Novo chamado'],
+      ['#/chamados', 'Chamados'],
+      ['#/novo', 'Novo chamado'],
+      ['#/historico', 'Histórico'],
     ];
-    if (ehFinanceiro()) links.push(['#/notificacoes', '🔔 Notificações']);
-    if (ehAdmin()) links.push(['#/usuarios', '👤 Usuários']);
+    if (ehFinanceiro()) links.push(['#/relatorios', 'Relatórios']);
+    if (ehFinanceiro()) links.push(['#/notificacoes', 'Notificações']);
+    if (ehAdmin()) links.push(['#/usuarios', 'Usuários']);
     for (const [href, rotulo] of links) {
       const a = el('a', { href }, rotulo);
       if (navAtual() === href.slice(1) || (href === '#/chamados' && navAtual().startsWith('/chamado/'))) a.classList.add('ativo');
@@ -210,6 +262,8 @@
     const cont = $('#conteudo');
     try {
       if (rota === '/novo') return renderNovo(cont);
+      if (rota === '/historico') return await renderHistorico(cont);
+      if (rota === '/relatorios' && ehFinanceiro()) return await renderRelatorios(cont);
       if (rota === '/notificacoes' && ehFinanceiro()) return await renderNotificacoes(cont);
       if (rota === '/usuarios' && ehAdmin()) return await renderUsuarios(cont);
       const m = rota.match(/^\/chamado\/(.+)$/);
@@ -221,6 +275,48 @@
     }
   }
 
+  // -------------------------------------------- tabela de chamados (comum)
+  function tabelaChamados(lista) {
+    const tabela = el('table', { class: 'lista' },
+      el('thead', null, el('tr', null,
+        ...['Nº', 'Tipo', 'Solicitante', 'Veículo / Compra', 'Rota', 'Data da viagem', 'Valor total', 'Status', 'Aberto em']
+          .map((h) => el('th', null, h)))));
+    const tbody = el('tbody');
+    for (const c of lista) {
+      tbody.append(el('tr', { onclick: () => { location.hash = '#/chamado/' + c.id; } },
+        el('td', null, el('strong', null, c.id)),
+        el('td', null, chipTipo(c.tipo)),
+        el('td', null, c.solicitante.nome),
+        el('td', null, resumoChamado(c)),
+        el('td', null, c.tipo === 'compra' ? '—' : (c.rota || '—')),
+        el('td', null, c.tipo === 'compra' ? '—' : fmtDataViagem(c.dataViagem)),
+        el('td', null, fmtMoeda(c.valorTotalCent)),
+        el('td', null, chipStatus(c.status)),
+        el('td', { class: 'mudo' }, fmtData(c.criadoEm))));
+    }
+    tabela.append(tbody);
+    return tabela;
+  }
+
+  function filtrarChamados(lista, busca, status) {
+    let r = lista;
+    if (status) r = r.filter((c) => c.status === status);
+    const b = String(busca || '').trim().toLowerCase();
+    if (b) {
+      r = r.filter((c) => [
+        c.id,
+        c.solicitante.nome,
+        c.rota || '',
+        c.veiculo ? c.veiculo.placa : '',
+        c.veiculo ? c.veiculo.modelo : '',
+        c.condutor ? c.condutor.nome : '',
+        c.compra ? c.compra.descricao : '',
+        c.compra ? c.compra.fornecedor : '',
+      ].join(' ').toLowerCase().includes(b));
+    }
+    return r;
+  }
+
   // ------------------------------------------------------------------ lista
   async function renderLista(cont) {
     const r = await api('GET', '/api/chamados');
@@ -229,16 +325,16 @@
 
     const filtros = el('div', { class: 'filtros' },
       el('input', {
-        type: 'search', placeholder: 'Buscar por nº, placa, condutor, solicitante…',
+        type: 'search', placeholder: 'Buscar por nº, placa, condutor, rota, compra…',
         value: state.filtroBusca,
         oninput: (e) => { state.filtroBusca = e.target.value; desenhar(); },
       }),
       (() => {
         const s = el('select', {
           onchange: (e) => { state.filtroStatus = e.target.value; desenhar(); },
-        }, el('option', { value: '' }, 'Todos os status'));
-        for (const [v, rot] of Object.entries(STATUS_LABEL)) {
-          const o = el('option', { value: v }, rot);
+        }, el('option', { value: '' }, 'Todos os status em andamento'));
+        for (const v of STATUS_ATIVOS) {
+          const o = el('option', { value: v }, STATUS_LABEL[v]);
           if (state.filtroStatus === v) o.selected = true;
           s.append(o);
         }
@@ -249,77 +345,218 @@
     const envolta = el('div', { class: 'tabela-envolta' });
     const cartao = el('div', { class: 'cartao' },
       el('div', { class: 'linha-topo' },
-        el('h2', null, 'Chamados'),
-        el('a', { href: '#/novo' }, el('button', { class: 'btn btn-primario' }, '➕ Novo chamado'))),
+        el('h2', null, 'Chamados em andamento'),
+        el('a', { href: '#/novo' }, el('button', { class: 'btn btn-primario' }, 'Novo chamado'))),
+      el('p', { class: 'mudo' }, 'Chamados finalizados e cancelados ficam na aba Histórico.'),
       filtros, envolta);
     cont.append(cartao);
 
     function desenhar() {
-      const b = state.filtroBusca.trim().toLowerCase();
-      let lista = state.chamados;
-      if (state.filtroStatus) lista = lista.filter((c) => c.status === state.filtroStatus);
-      if (b) {
-        lista = lista.filter((c) =>
-          [c.id, c.veiculo.placa, c.veiculo.modelo, c.condutor.nome, c.solicitante.nome]
-            .join(' ').toLowerCase().includes(b));
-      }
+      const ativos = state.chamados.filter((c) => STATUS_ATIVOS.includes(c.status));
+      const lista = filtrarChamados(ativos, state.filtroBusca, state.filtroStatus);
       envolta.innerHTML = '';
       if (!lista.length) {
-        envolta.append(el('div', { class: 'vazio' }, 'Nenhum chamado encontrado. Clique em "Novo chamado" para abrir o primeiro.'));
+        envolta.append(el('div', { class: 'vazio' }, 'Nenhum chamado em andamento. Clique em "Novo chamado" para abrir o primeiro.'));
         return;
       }
-      const tabela = el('table', { class: 'lista' },
-        el('thead', null, el('tr', null,
-          ...['Nº', 'Solicitante', 'Veículo', 'Condutor', 'Valor total', 'Adiantamento (70%)', 'Saldo', 'Status', 'Aberto em']
-            .map((h) => el('th', null, h)))));
-      const tbody = el('tbody');
-      for (const c of lista) {
-        tbody.append(el('tr', { onclick: () => { location.hash = '#/chamado/' + c.id; } },
-          el('td', null, el('strong', null, c.id)),
-          el('td', null, c.solicitante.nome),
-          el('td', null, c.veiculo.placa + ' · ' + c.veiculo.modelo),
-          el('td', null, c.condutor.nome),
-          el('td', null, fmtMoeda(c.valorTotalCent)),
-          el('td', null, fmtMoeda(c.adiantamentoCent)),
-          el('td', null, fmtMoeda(c.saldoCent)),
-          el('td', null, chipStatus(c.status)),
-          el('td', { class: 'mudo' }, fmtData(c.criadoEm))));
-      }
-      tabela.append(tbody);
-      envolta.append(tabela);
+      envolta.append(tabelaChamados(lista));
     }
     desenhar();
+  }
+
+  // ------------------------------------------------------------------ histórico (aba)
+  async function renderHistorico(cont) {
+    const r = await api('GET', '/api/chamados');
+    state.chamados = r.chamados;
+    cont.innerHTML = '';
+
+    const filtros = el('div', { class: 'filtros' },
+      el('input', {
+        type: 'search', placeholder: 'Buscar no histórico…',
+        value: state.filtroBuscaHist,
+        oninput: (e) => { state.filtroBuscaHist = e.target.value; desenhar(); },
+      }),
+      (() => {
+        const s = el('select', {
+          onchange: (e) => { state.filtroStatusHist = e.target.value; desenhar(); },
+        }, el('option', { value: '' }, 'Finalizados e cancelados'));
+        for (const v of STATUS_HISTORICO) {
+          const o = el('option', { value: v }, STATUS_LABEL[v]);
+          if (state.filtroStatusHist === v) o.selected = true;
+          s.append(o);
+        }
+        return s;
+      })()
+    );
+
+    const envolta = el('div', { class: 'tabela-envolta' });
+    cont.append(el('div', { class: 'cartao' },
+      el('div', { class: 'linha-topo' }, el('h2', null, 'Histórico de chamados')),
+      el('p', { class: 'mudo' }, 'Todos os chamados já finalizados ou cancelados.'),
+      filtros, envolta));
+
+    function desenhar() {
+      const encerrados = state.chamados.filter((c) => STATUS_HISTORICO.includes(c.status));
+      const lista = filtrarChamados(encerrados, state.filtroBuscaHist, state.filtroStatusHist);
+      envolta.innerHTML = '';
+      if (!lista.length) {
+        envolta.append(el('div', { class: 'vazio' }, 'Nenhum chamado finalizado ou cancelado ainda.'));
+        return;
+      }
+      envolta.append(tabelaChamados(lista));
+    }
+    desenhar();
+  }
+
+  // ------------------------------------------------------------------ relatórios (financeiro/admin)
+  async function renderRelatorios(cont) {
+    const r = await api('GET', '/api/relatorios/compras');
+    cont.innerHTML = '';
+
+    const compras = r.compras || [];
+    const validas = compras.filter((c) => c.status !== 'cancelado');
+    const totalGeral = validas.reduce((s, c) => s + c.valorTotalCent, 0);
+    const hoje = new Date().toLocaleDateString('pt-BR');
+    const totalHoje = validas
+      .filter((c) => new Date(c.criadoEm).toLocaleDateString('pt-BR') === hoje)
+      .reduce((s, c) => s + c.valorTotalCent, 0);
+
+    const resumo = el('div', { class: 'valores' },
+      el('div', { class: 'valor-cartao destaque' },
+        el('div', { class: 'rotulo' }, 'Total de hoje (' + hoje + ')'),
+        el('div', { class: 'valor' }, fmtMoeda(totalHoje))),
+      el('div', { class: 'valor-cartao' },
+        el('div', { class: 'rotulo' }, 'Total geral de compras'),
+        el('div', { class: 'valor' }, fmtMoeda(totalGeral))),
+      el('div', { class: 'valor-cartao' },
+        el('div', { class: 'rotulo' }, 'Compras registradas'),
+        el('div', { class: 'valor' }, String(compras.length))));
+
+    const cartao = el('div', { class: 'cartao' },
+      el('div', { class: 'linha-topo' }, el('h2', null, 'Relatório de compras')),
+      el('p', { class: 'mudo' }, 'Todas as compras agrupadas por dia, com o valor total de cada dia. Compras canceladas aparecem na lista mas não somam nos totais.'),
+      resumo);
+    cont.append(cartao);
+
+    if (!compras.length) {
+      cartao.append(el('div', { class: 'vazio' }, 'Nenhuma compra registrada ainda. Abra um chamado do tipo Compra.'));
+      return;
+    }
+
+    // Agrupa por dia (data local de abertura), mais recente primeiro.
+    const grupos = new Map();
+    for (const c of compras) {
+      const dia = new Date(c.criadoEm).toLocaleDateString('pt-BR');
+      if (!grupos.has(dia)) grupos.set(dia, []);
+      grupos.get(dia).push(c);
+    }
+
+    for (const [dia, itens] of grupos) {
+      const totalDia = itens.filter((c) => c.status !== 'cancelado').reduce((s, c) => s + c.valorTotalCent, 0);
+      const tabela = el('table', { class: 'lista' },
+        el('thead', null, el('tr', null,
+          ...['Nº', 'Hora', 'Solicitante', 'Descrição', 'Fornecedor', 'Valor', 'Status'].map((h) => el('th', null, h)))));
+      const tbody = el('tbody');
+      for (const c of itens) {
+        tbody.append(el('tr', { onclick: () => { location.hash = '#/chamado/' + c.id; } },
+          el('td', null, el('strong', null, c.id)),
+          el('td', null, new Date(c.criadoEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })),
+          el('td', null, c.solicitante),
+          el('td', null, c.descricao),
+          el('td', null, c.fornecedor || '—'),
+          el('td', null, fmtMoeda(c.valorTotalCent)),
+          el('td', null, chipStatus(c.status))));
+      }
+      tabela.append(tbody);
+      cartao.append(el('div', { class: 'relatorio-dia' },
+        el('div', { class: 'relatorio-dia-topo' },
+          el('h3', null, dia),
+          el('div', { class: 'relatorio-total' }, 'Total do dia: ' + fmtMoeda(totalDia))),
+        el('div', { class: 'tabela-envolta' }, tabela)));
+    }
   }
 
   // ------------------------------------------------------------------ novo chamado
   function renderNovo(cont) {
     cont.innerHTML = '';
+    let tipo = 'viagem';
+
+    // ---- valor + prévia 70/30 (só para viagem) ----
     const previa = el('div', { class: 'previa-valores oculto' });
     const inputValor = el('input', { type: 'text', inputmode: 'decimal', placeholder: 'Ex.: 1.500,00', required: '' });
-    inputValor.addEventListener('input', () => {
+    const atualizarPrevia = () => {
       const cent = parseMoeda(inputValor.value);
-      if (!cent) { previa.classList.add('oculto'); return; }
+      if (!cent || tipo === 'compra') { previa.classList.add('oculto'); return; }
       const adiant = Math.round(cent * 0.7);
       previa.classList.remove('oculto');
       previa.innerHTML =
         '<div><div class="rotulo">Adiantamento (70%)</div><div class="num">' + esc(fmtMoeda(adiant)) + '</div></div>' +
         '<div><div class="rotulo">Saldo (30%)</div><div class="num">' + esc(fmtMoeda(cent - adiant)) + '</div></div>' +
         '<div><div class="rotulo">Valor total</div><div class="num">' + esc(fmtMoeda(cent)) + '</div></div>';
-    });
+    };
+    inputValor.addEventListener('input', atualizarPrevia);
 
     const campo = (rotulo, attrs) => {
       const i = el('input', Object.assign({ type: 'text' }, attrs || {}));
       return { rotulo: el('label', null, rotulo, i), input: i };
     };
-    const placa = campo('Placa *', { placeholder: 'ABC-1D23', required: '' });
-    const modelo = campo('Marca / modelo *', { placeholder: 'Ex.: VW Constellation 24.280', required: '' });
-    const ano = campo('Ano', { placeholder: 'Ex.: 2020' });
-    const km = campo('KM atual', { placeholder: 'Ex.: 154.000', inputmode: 'numeric' });
-    const cNome = campo('Nome do condutor *', { required: '' });
-    const cDoc = campo('CPF', { placeholder: '000.000.000-00' });
-    const cCnh = campo('CNH', { placeholder: 'Número da CNH' });
-    const cTel = campo('Telefone', { placeholder: '(00) 90000-0000' });
-    const obs = el('textarea', { rows: '3', placeholder: 'Destino, motivo da viagem, observações…' });
+
+    // ---- campos de viagem ----
+    const placa = campo('Placa (BR ou Mercosul) *', { placeholder: 'ABC-1234 ou ABC1D23', maxlength: '8' });
+    aplicarMascara(placa.input, mascaraPlaca);
+    const modelo = campo('Marca / modelo *', { placeholder: 'Ex.: VW Constellation 24.280' });
+    const ano = campo('Ano', { placeholder: 'Ex.: 2020', inputmode: 'numeric', maxlength: '4' });
+    aplicarMascara(ano.input, (v) => soDigitos(v).slice(0, 4));
+    const km = campo('KM atual', { placeholder: 'Ex.: 154000', inputmode: 'numeric' });
+    aplicarMascara(km.input, (v) => soDigitos(v).slice(0, 9));
+    const dataViagem = campo('Data da viagem *', { type: 'date' });
+    const rotaViagem = campo('Rota da viagem', { placeholder: 'Ex.: São Paulo → Curitiba (BR-116)' });
+    const cNome = campo('Nome do condutor *', {});
+    const cDoc = campo('CPF (só números)', { placeholder: '000.000.000-00', inputmode: 'numeric', maxlength: '14' });
+    aplicarMascara(cDoc.input, mascaraCpf);
+    const cCnh = campo('CNH (só números)', { placeholder: '11 números da CNH', inputmode: 'numeric', maxlength: '11' });
+    aplicarMascara(cCnh.input, (v) => soDigitos(v).slice(0, 11));
+    const cTel = campo('Telefone', { placeholder: '(00) 90000-0000', inputmode: 'numeric', maxlength: '15' });
+    aplicarMascara(cTel.input, mascaraTelefone);
+
+    // ---- campos de compra ----
+    const compraDesc = campo('O que será comprado? *', { placeholder: 'Ex.: 4 pneus 295/80 R22.5' });
+    const compraForn = campo('Fornecedor', { placeholder: 'Ex.: Pneus Brasil Ltda.' });
+
+    const obs = el('textarea', { rows: '3', placeholder: 'Motivo, detalhes, observações…' });
+
+    const secViagemVeiculo = el('div', null,
+      el('h3', { class: 'form-secao' }, 'Dados do veículo'),
+      el('div', { class: 'form-grade' }, placa.rotulo, modelo.rotulo, ano.rotulo, km.rotulo),
+      el('h3', { class: 'form-secao' }, 'Viagem'),
+      el('div', { class: 'form-grade' }, dataViagem.rotulo, rotaViagem.rotulo),
+      el('h3', { class: 'form-secao' }, 'Dados do condutor'),
+      el('div', { class: 'form-grade' }, cNome.rotulo, cDoc.rotulo, cCnh.rotulo, cTel.rotulo));
+
+    const secCompra = el('div', { class: 'oculto' },
+      el('h3', { class: 'form-secao' }, 'Dados da compra'),
+      el('div', { class: 'form-grade' }, compraDesc.rotulo, compraForn.rotulo));
+
+    const rotuloValor = el('label', null, 'Valor total (R$) *', inputValor);
+    const dicaValor = el('p', { class: 'mudo' },
+      'O sistema calcula automaticamente o adiantamento de 70% e o saldo de 30%.');
+
+    // ---- seletor de tipo ----
+    const btnViagem = el('button', { type: 'button', class: 'tipo-btn ativo' }, 'Adiantamento de viagem');
+    const btnCompra = el('button', { type: 'button', class: 'tipo-btn' }, 'Compra');
+    function definirTipo(novo) {
+      tipo = novo;
+      btnViagem.classList.toggle('ativo', tipo === 'viagem');
+      btnCompra.classList.toggle('ativo', tipo === 'compra');
+      secViagemVeiculo.classList.toggle('oculto', tipo !== 'viagem');
+      secCompra.classList.toggle('oculto', tipo !== 'compra');
+      dicaValor.textContent = tipo === 'viagem'
+        ? 'O sistema calcula automaticamente o adiantamento de 70% e o saldo de 30%.'
+        : 'Compra é paga em parcela única pelo financeiro (sem 70/30).';
+      atualizarPrevia();
+    }
+    btnViagem.addEventListener('click', () => definirTipo('viagem'));
+    btnCompra.addEventListener('click', () => definirTipo('compra'));
 
     const btn = el('button', { class: 'btn btn-primario', type: 'submit' }, 'Abrir chamado');
     const form = el('form', {
@@ -327,15 +564,32 @@
         e.preventDefault();
         const valorTotalCent = parseMoeda(inputValor.value);
         if (!valorTotalCent) { toast('Informe um valor total válido.', 'erro'); return; }
+
+        const corpo = { tipo, valorTotalCent, observacoes: obs.value };
+        if (tipo === 'viagem') {
+          if (!placaValida(placa.input.value)) { toast('Placa inválida. Use ABC-1234 (antiga) ou ABC1D23 (Mercosul).', 'erro'); placa.input.focus(); return; }
+          if (!modelo.input.value.trim()) { toast('Informe o modelo do veículo.', 'erro'); modelo.input.focus(); return; }
+          if (!dataViagem.input.value) { toast('Informe a data da viagem.', 'erro'); dataViagem.input.focus(); return; }
+          if (!cNome.input.value.trim()) { toast('Informe o nome do condutor.', 'erro'); cNome.input.focus(); return; }
+          const telD = soDigitos(cTel.input.value);
+          if (telD && telD.length !== 10 && telD.length !== 11) { toast('Telefone incompleto. Use DDD + número.', 'erro'); cTel.input.focus(); return; }
+          const cpfD = soDigitos(cDoc.input.value);
+          if (cpfD && cpfD.length !== 11) { toast('CPF incompleto: são 11 números.', 'erro'); cDoc.input.focus(); return; }
+          const cnhD = soDigitos(cCnh.input.value);
+          if (cnhD && cnhD.length !== 11) { toast('CNH incompleta: são 11 números.', 'erro'); cCnh.input.focus(); return; }
+          corpo.veiculo = { placa: placa.input.value, modelo: modelo.input.value, ano: ano.input.value, km: km.input.value };
+          corpo.condutor = { nome: cNome.input.value, documento: cDoc.input.value, cnh: cCnh.input.value, telefone: cTel.input.value };
+          corpo.dataViagem = dataViagem.input.value;
+          corpo.rota = rotaViagem.input.value;
+        } else {
+          if (!compraDesc.input.value.trim()) { toast('Descreva o que será comprado.', 'erro'); compraDesc.input.focus(); return; }
+          corpo.compra = { descricao: compraDesc.input.value, fornecedor: compraForn.input.value };
+        }
+
         btn.disabled = true;
         try {
-          const r = await api('POST', '/api/chamados', {
-            veiculo: { placa: placa.input.value, modelo: modelo.input.value, ano: ano.input.value, km: km.input.value },
-            condutor: { nome: cNome.input.value, documento: cDoc.input.value, cnh: cCnh.input.value, telefone: cTel.input.value },
-            valorTotalCent,
-            observacoes: obs.value,
-          });
-          toast('Chamado ' + r.chamado.id + ' aberto. O financeiro foi notificado.', null, '✅ Chamado criado');
+          const r = await api('POST', '/api/chamados', corpo);
+          toast('Chamado ' + r.chamado.id + ' aberto. O financeiro foi notificado.', null, 'Chamado criado');
           state.abaDetalhe = 'financeiro';
           location.hash = '#/chamado/' + r.chamado.id;
         } catch (err) {
@@ -345,21 +599,22 @@
         }
       },
     },
-      el('h3', { class: 'form-secao' }, '🚛 Dados do veículo'),
-      el('div', { class: 'form-grade' }, placa.rotulo, modelo.rotulo, ano.rotulo, km.rotulo),
-      el('h3', { class: 'form-secao' }, '🧑‍✈️ Dados do condutor'),
-      el('div', { class: 'form-grade' }, cNome.rotulo, cDoc.rotulo, cCnh.rotulo, cTel.rotulo),
-      el('h3', { class: 'form-secao' }, '💰 Valor do chamado'),
-      el('div', { class: 'form-grade' }, el('label', null, 'Valor total (R$) *', inputValor)),
+      el('h3', { class: 'form-secao' }, 'Tipo de chamado'),
+      el('div', { class: 'tipo-escolha' }, btnViagem, btnCompra),
+      secViagemVeiculo,
+      secCompra,
+      el('h3', { class: 'form-secao' }, 'Valor do chamado'),
+      dicaValor,
+      el('div', { class: 'form-grade' }, rotuloValor),
       previa,
-      el('h3', { class: 'form-secao' }, '📝 Observações'),
+      el('h3', { class: 'form-secao' }, 'Observações'),
       obs,
       el('div', { class: 'acoes-status' }, btn,
         el('button', { class: 'btn btn-suave', type: 'button', onclick: () => { location.hash = '#/chamados'; } }, 'Cancelar')));
 
     cont.append(el('div', { class: 'cartao' },
-      el('div', { class: 'linha-topo' }, el('h2', null, 'Novo chamado financeiro')),
-      el('p', { class: 'mudo' }, 'Preencha os dados do veículo, do condutor e o valor total. O sistema calcula automaticamente o adiantamento de 70% e o saldo de 30%.'),
+      el('div', { class: 'linha-topo' }, el('h2', null, 'Novo chamado')),
+      el('p', { class: 'mudo' }, 'Escolha o tipo do chamado: adiantamento de viagem (70/30) ou compra (pagamento único).'),
       form));
   }
 
@@ -369,12 +624,17 @@
     const c = r.chamado;
     cont.innerHTML = '';
 
-    const abas = [
-      ['financeiro', '💰 Adiantamento e saldo'],
-      ['anexos', '📷 Anexos da viagem'],
-      ['dados', '🚛 Dados'],
-      ['historico', '🕓 Histórico'],
+    const abas = c.tipo === 'compra' ? [
+      ['financeiro', 'Pagamento'],
+      ['dados', 'Dados'],
+      ['historico', 'Histórico'],
+    ] : [
+      ['financeiro', 'Adiantamento e saldo'],
+      ['anexos', 'Anexos da viagem'],
+      ['dados', 'Dados'],
+      ['historico', 'Histórico'],
     ];
+    if (!abas.some(([k]) => k === state.abaDetalhe)) state.abaDetalhe = 'financeiro';
     const corpoAba = el('div');
     const barraAbas = el('div', { class: 'abas' });
     for (const [chave, rotulo] of abas) {
@@ -382,28 +642,66 @@
       barraAbas.append(b);
     }
 
+    const subtitulo = c.tipo === 'compra'
+      ? 'Solicitante: ' + c.solicitante.nome + (c.compra && c.compra.fornecedor ? ' · Fornecedor: ' + c.compra.fornecedor : '') + ' · Aberto em ' + fmtData(c.criadoEm)
+      : 'Solicitante: ' + c.solicitante.nome + ' · Condutor: ' + c.condutor.nome +
+        ' · Viagem: ' + fmtDataViagem(c.dataViagem) + (c.rota ? ' · Rota: ' + c.rota : '') +
+        ' · Aberto em ' + fmtData(c.criadoEm);
+
     cont.append(el('div', { class: 'cartao' },
       el('div', { class: 'linha-topo' },
-        el('h2', null, c.id + ' — ' + c.veiculo.placa),
-        el('div', null, chipStatus(c.status))),
-      el('p', { class: 'mudo' },
-        'Solicitante: ' + c.solicitante.nome + ' · Condutor: ' + c.condutor.nome + ' · Aberto em ' + fmtData(c.criadoEm)),
+        el('h2', null, c.id + ' — ' + (c.tipo === 'compra' ? (c.compra ? c.compra.descricao : 'Compra') : c.veiculo.placa)),
+        el('div', null, chipTipo(c.tipo), ' ', chipStatus(c.status))),
+      el('p', { class: 'mudo' }, subtitulo),
       barraAbas, corpoAba));
 
-    if (state.abaDetalhe === 'anexos') renderAbaAnexos(corpoAba, c);
+    if (state.abaDetalhe === 'anexos' && c.tipo !== 'compra') renderAbaAnexos(corpoAba, c);
     else if (state.abaDetalhe === 'dados') renderAbaDados(corpoAba, c);
     else if (state.abaDetalhe === 'historico') renderAbaHistorico(corpoAba, c);
+    else if (c.tipo === 'compra') renderAbaPagamentoCompra(corpoAba, c);
     else renderAbaFinanceiro(corpoAba, c);
   }
 
-  function renderAbaFinanceiro(corpo, c) {
-    const cartaoValor = (rotulo, cent, statusChip, obs, destaque) =>
-      el('div', { class: 'valor-cartao' + (destaque ? ' destaque' : '') },
-        el('div', { class: 'rotulo' }, rotulo),
-        el('div', { class: 'valor' }, fmtMoeda(cent)),
-        statusChip ? el('div', null, statusChip) : null,
-        obs ? el('div', { class: 'obs' }, obs) : null);
+  function cartaoValor(rotulo, cent, statusChip, obs, destaque) {
+    return el('div', { class: 'valor-cartao' + (destaque ? ' destaque' : '') },
+      el('div', { class: 'rotulo' }, rotulo),
+      el('div', { class: 'valor' }, fmtMoeda(cent)),
+      statusChip ? el('div', null, statusChip) : null,
+      obs ? el('div', { class: 'obs' }, obs) : null);
+  }
 
+  async function acaoChamado(caminho, msg) {
+    try {
+      await api('POST', caminho, {});
+      toast(msg);
+      renderRota();
+    } catch (e) { toast(e.message, 'erro'); }
+  }
+
+  function renderAbaPagamentoCompra(corpo, c) {
+    corpo.append(el('div', { class: 'valores' },
+      cartaoValor('Valor da compra', c.valorTotalCent,
+        c.compraPagaEm ? el('span', { class: 'chip chip-pago' }, 'Pago em ' + fmtData(c.compraPagaEm))
+          : el('span', { class: 'chip chip-pendente' }, 'Pendente'),
+        'Pagamento único registrado pelo financeiro.', true)));
+
+    const acoes = el('div', { class: 'acoes-status' });
+    if (ehFinanceiro() && !c.compraPagaEm && c.status !== 'cancelado') {
+      acoes.append(el('button', {
+        class: 'btn btn-verde',
+        onclick: () => acaoChamado('/api/chamados/' + c.id + '/compra-paga', 'Compra registrada como paga. Chamado finalizado.'),
+      }, 'Marcar compra como paga'));
+    }
+    if (ehAdmin() && c.status !== 'finalizado' && c.status !== 'cancelado') {
+      acoes.append(el('button', {
+        class: 'btn btn-perigo',
+        onclick: () => { if (confirm('Cancelar este chamado?')) acaoChamado('/api/chamados/' + c.id + '/cancelar', 'Chamado cancelado.'); },
+      }, 'Cancelar chamado'));
+    }
+    if (acoes.children.length) corpo.append(acoes);
+  }
+
+  function renderAbaFinanceiro(corpo, c) {
     corpo.append(el('div', { class: 'valores' },
       cartaoValor('Valor total', c.valorTotalCent, null, 'Informado pelo solicitante na abertura.'),
       cartaoValor('Adiantamento (70%)', c.adiantamentoCent,
@@ -420,30 +718,30 @@
     if (ehFinanceiro() && !c.adiantamentoPagoEm && c.status !== 'cancelado') {
       acoes.append(el('button', {
         class: 'btn btn-verde',
-        onclick: () => acao('/api/chamados/' + c.id + '/adiantamento-pago', 'Adiantamento registrado como pago.'),
-      }, '✔ Marcar adiantamento como pago'));
+        onclick: () => acaoChamado('/api/chamados/' + c.id + '/adiantamento-pago', 'Adiantamento registrado como pago.'),
+      }, 'Marcar adiantamento como pago'));
     }
     if (!c.encerramentoConfirmadoEm && c.status !== 'cancelado') {
       acoes.append(el('button', {
         class: 'btn btn-primario',
         onclick: () => {
           if (confirm('Confirmar o encerramento da viagem? O lembrete de pagamento do saldo será agendado para daqui a 5 dias.')) {
-            acao('/api/chamados/' + c.id + '/encerrar-viagem', 'Encerramento confirmado. Lembrete do saldo agendado (5 dias).');
+            acaoChamado('/api/chamados/' + c.id + '/encerrar-viagem', 'Encerramento confirmado. Lembrete do saldo agendado (5 dias).');
           }
         },
-      }, '🏁 Confirmar encerramento da viagem'));
+      }, 'Confirmar encerramento da viagem'));
     }
     if (ehFinanceiro() && c.encerramentoConfirmadoEm && !c.saldoPagoEm && c.status !== 'cancelado') {
       acoes.append(el('button', {
         class: 'btn btn-verde',
-        onclick: () => acao('/api/chamados/' + c.id + '/saldo-pago', 'Saldo pago. Chamado finalizado.'),
-      }, '✔ Marcar saldo como pago'));
+        onclick: () => acaoChamado('/api/chamados/' + c.id + '/saldo-pago', 'Saldo pago. Chamado finalizado.'),
+      }, 'Marcar saldo como pago'));
     }
     if (ehAdmin() && c.status !== 'finalizado' && c.status !== 'cancelado') {
       acoes.append(el('button', {
         class: 'btn btn-perigo',
-        onclick: () => { if (confirm('Cancelar este chamado?')) acao('/api/chamados/' + c.id + '/cancelar', 'Chamado cancelado.'); },
-      }, '✖ Cancelar chamado'));
+        onclick: () => { if (confirm('Cancelar este chamado?')) acaoChamado('/api/chamados/' + c.id + '/cancelar', 'Chamado cancelado.'); },
+      }, 'Cancelar chamado'));
     }
     if (acoes.children.length) corpo.append(acoes);
 
@@ -451,17 +749,9 @@
       const quando = new Date(Date.parse(c.encerramentoConfirmadoEm) + 5 * 24 * 60 * 60 * 1000);
       corpo.append(el('div', { class: 'aviso-lembrete' },
         c.lembreteSaldoEm
-          ? '⏰ Lembrete de pagamento do saldo já enviado ao financeiro em ' + fmtData(c.lembreteSaldoEm) + '.'
-          : '⏰ Viagem encerrada em ' + fmtData(c.encerramentoConfirmadoEm) +
+          ? 'Lembrete de pagamento do saldo já enviado ao financeiro em ' + fmtData(c.lembreteSaldoEm) + '.'
+          : 'Viagem encerrada em ' + fmtData(c.encerramentoConfirmadoEm) +
             '. O financeiro receberá o lembrete de pagamento do saldo em ' + quando.toLocaleDateString('pt-BR') + ' (5 dias após o encerramento).'));
-    }
-
-    async function acao(caminho, msg) {
-      try {
-        await api('POST', caminho, {});
-        toast(msg);
-        renderRota();
-      } catch (e) { toast(e.message, 'erro'); }
     }
   }
 
@@ -489,7 +779,7 @@
           leitor.readAsDataURL(arquivo);
         });
         g.append(
-          el('button', { class: 'btn btn-suave', onclick: () => inputArquivo.click() }, '📎 Anexar foto de ' + (tipo === 'entrada' ? 'entrada' : 'saída')),
+          el('button', { class: 'btn btn-suave', onclick: () => inputArquivo.click() }, 'Anexar foto de ' + (tipo === 'entrada' ? 'entrada' : 'saída')),
           inputArquivo);
       }
       const minis = el('div', { class: 'anexo-miniaturas' });
@@ -508,7 +798,7 @@
               try { await api('DELETE', '/api/chamados/' + c.id + '/anexos/' + a.id); toast('Foto removida.'); renderRota(); }
               catch (e) { toast(e.message, 'erro'); }
             },
-          }, '✕'));
+          }, '×'));
         }
         minis.append(mini);
       }
@@ -516,8 +806,8 @@
       return g;
     };
     corpo.append(el('div', { class: 'anexos-grupos' },
-      grupo('entrada', '🚚 Entrada da viagem', 'Fotos do veículo/odômetro na SAÍDA da base (início da viagem).'),
-      grupo('saida', '🏁 Saída da viagem', 'Fotos do veículo/odômetro no RETORNO (fim da viagem).')));
+      grupo('entrada', 'Entrada da viagem', 'Fotos do veículo/odômetro na SAÍDA da base (início da viagem).'),
+      grupo('saida', 'Saída da viagem', 'Fotos do veículo/odômetro no RETORNO (fim da viagem).')));
     if (bloqueado) corpo.append(el('p', { class: 'mudo' }, 'Chamado ' + STATUS_LABEL[c.status].toLowerCase() + ': os anexos estão travados.'));
   }
 
@@ -530,20 +820,40 @@
       }
       return el('div', { class: 'dados-bloco' }, el('h4', null, titulo), dl);
     };
+    if (c.tipo === 'compra') {
+      corpo.append(el('div', { class: 'dados-grade' },
+        bloco('Compra', [
+          ['Descrição', c.compra ? c.compra.descricao : ''],
+          ['Fornecedor', c.compra ? c.compra.fornecedor : ''],
+          ['Valor', fmtMoeda(c.valorTotalCent)],
+          ['Pagamento', c.compraPagaEm ? 'Pago em ' + fmtData(c.compraPagaEm) : 'Pendente'],
+        ]),
+        bloco('Chamado', [
+          ['Solicitante', c.solicitante.nome],
+          ['Aberto em', fmtData(c.criadoEm)],
+          ['Status', STATUS_LABEL[c.status]],
+          ['Observações', c.observacoes],
+        ])));
+      return;
+    }
     corpo.append(el('div', { class: 'dados-grade' },
-      bloco('🚛 Veículo', [
+      bloco('Veículo', [
         ['Placa', c.veiculo.placa], ['Marca / modelo', c.veiculo.modelo],
         ['Ano', c.veiculo.ano], ['KM na abertura', c.veiculo.km],
       ]),
-      bloco('🧑‍✈️ Condutor', [
+      bloco('Condutor', [
         ['Nome', c.condutor.nome], ['CPF', c.condutor.documento],
         ['CNH', c.condutor.cnh], ['Telefone', c.condutor.telefone],
       ]),
-      bloco('📋 Chamado', [
+      bloco('Viagem', [
+        ['Data da viagem', fmtDataViagem(c.dataViagem)],
+        ['Rota', c.rota],
+        ['Encerramento', c.encerramentoConfirmadoEm ? fmtData(c.encerramentoConfirmadoEm) : 'Ainda não confirmado'],
+      ]),
+      bloco('Chamado', [
         ['Solicitante', c.solicitante.nome],
         ['Aberto em', fmtData(c.criadoEm)],
         ['Status', STATUS_LABEL[c.status]],
-        ['Encerramento da viagem', c.encerramentoConfirmadoEm ? fmtData(c.encerramentoConfirmadoEm) : 'Ainda não confirmado'],
         ['Observações', c.observacoes],
       ])));
   }
@@ -564,12 +874,12 @@
     cont.innerHTML = '';
     const cartao = el('div', { class: 'cartao' },
       el('div', { class: 'linha-topo' }, el('h2', null, 'Notificações'),
-        el('span', { class: 'mudo' }, 'Os avisos na barra de tarefas se repetem até serem marcados como vistos.')));
+        el('span', { class: 'mudo' }, 'Cada aviso aparece uma vez na barra de tarefas; marque como visto para limpar o sino.')));
     if (!r.notificacoes.length) cartao.append(el('div', { class: 'vazio' }, 'Nenhuma notificação por enquanto.'));
     for (const n of r.notificacoes) {
       const pendente = !n.reconhecidaPor;
       const item = el('div', { class: 'notif ' + (pendente ? 'pendente' : 'ok') },
-        el('div', { class: 'titulo' }, (n.tipo === 'lembrete_saldo' ? '⏰ ' : n.tipo === 'viagem_encerrada' ? '🏁 ' : '🆕 ') + n.titulo),
+        el('div', { class: 'titulo' }, n.titulo),
         el('div', { class: 'quando' }, fmtData(n.em) + (n.reconhecidaPor ? ' · vista por ' + n.reconhecidaPor.nome + ' em ' + fmtData(n.reconhecidaPor.em) : '')),
         el('div', { class: 'mensagem' }, n.mensagem),
         el('div', { class: 'acoes-status' },
@@ -580,7 +890,7 @@
               try { await api('POST', '/api/notificacoes/' + n.id + '/reconhecer'); renderRota(); atualizarSino(); }
               catch (e) { toast(e.message, 'erro'); }
             },
-          }, '✔ Marcar como visto (para os avisos)') : null));
+          }, 'Marcar como visto') : null));
       cartao.append(item);
     }
     cont.append(cartao);
@@ -611,7 +921,7 @@
       el('div', { class: 'form-grade' },
         el('label', null, 'Nome', nome), el('label', null, 'Login', login),
         el('label', null, 'Senha', senha), el('label', null, 'Papel', papel)),
-      el('div', { class: 'acoes-status' }, el('button', { class: 'btn btn-primario', type: 'submit' }, '➕ Criar usuário')));
+      el('div', { class: 'acoes-status' }, el('button', { class: 'btn btn-primario', type: 'submit' }, 'Criar usuário')));
 
     const envolta = el('div', { class: 'tabela-envolta' });
     const tabela = el('table', { class: 'lista' },
@@ -648,8 +958,8 @@
 
     cont.append(el('div', { class: 'cartao' },
       el('div', { class: 'linha-topo' }, el('h2', null, 'Usuários')),
-      el('h3', { class: 'form-secao' }, '➕ Novo usuário'), form,
-      el('h3', { class: 'form-secao' }, '👥 Usuários cadastrados'), envolta));
+      el('h3', { class: 'form-secao' }, 'Novo usuário'), form,
+      el('h3', { class: 'form-secao' }, 'Usuários cadastrados'), envolta));
   }
 
   // ------------------------------------------------------------------ inicialização

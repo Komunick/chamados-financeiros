@@ -113,6 +113,56 @@ function dataFmt(iso) {
   return dt.toLocaleDateString('pt-BR') + ' ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
+// ---------------------------------------------------------------------------
+// Padronização de dados brasileiros (placa, telefone, CPF, CNH).
+// Retornam o valor normalizado, '' quando vazio (campo opcional) ou null
+// quando o valor informado é inválido.
+// ---------------------------------------------------------------------------
+function normPlaca(v) {
+  const p = String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!p) return '';
+  if (/^[A-Z]{3}[0-9]{4}$/.test(p)) return p.slice(0, 3) + '-' + p.slice(3); // modelo antigo ABC-1234
+  if (/^[A-Z]{3}[0-9][A-Z][0-9]{2}$/.test(p)) return p;                      // Mercosul ABC1D23
+  return null;
+}
+function normTelefone(v) {
+  const t = String(v || '').replace(/\D/g, '');
+  if (!t) return '';
+  if (t.length === 11) return '(' + t.slice(0, 2) + ') ' + t.slice(2, 7) + '-' + t.slice(7);
+  if (t.length === 10) return '(' + t.slice(0, 2) + ') ' + t.slice(2, 6) + '-' + t.slice(6);
+  return null;
+}
+function normCpf(v) {
+  const c = String(v || '').replace(/\D/g, '');
+  if (!c) return '';
+  if (c.length !== 11 || /^(\d)\1{10}$/.test(c)) return null;
+  const dv = (base) => {
+    let s = 0;
+    for (let i = 0; i < base.length; i++) s += Number(base[i]) * (base.length + 1 - i);
+    const r = (s * 10) % 11;
+    return r === 10 ? 0 : r;
+  };
+  if (dv(c.slice(0, 9)) !== Number(c[9]) || dv(c.slice(0, 10)) !== Number(c[10])) return null;
+  return c.slice(0, 3) + '.' + c.slice(3, 6) + '.' + c.slice(6, 9) + '-' + c.slice(9);
+}
+function normCnh(v) {
+  const c = String(v || '').replace(/\D/g, '');
+  if (!c) return '';
+  if (c.length !== 11) return null;
+  return c;
+}
+function normDataViagem(v) {
+  const s = String(v || '').trim();
+  if (!s) return '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(s + 'T00:00:00'))) return null;
+  return s;
+}
+function dataViagemFmt(s) {
+  if (!s) return '';
+  const [a, m, d] = s.split('-');
+  return d + '/' + m + '/' + a;
+}
+
 function publicoUsuario(u) {
   return { id: u.id, nome: u.nome, login: u.login, papel: u.papel, criadoEm: u.criadoEm };
 }
@@ -136,11 +186,22 @@ function criarNotificacao(tipo, chamado, titulo, mensagem) {
     chamadoId: chamado.id,
     titulo,
     mensagem,
-    dados: {
+    dados: chamado.tipo === 'compra' ? {
       chamadoId: chamado.id,
+      tipoChamado: 'compra',
+      solicitante: chamado.solicitante.nome,
+      descricao: chamado.compra ? chamado.compra.descricao : '',
+      fornecedor: chamado.compra ? chamado.compra.fornecedor : '',
+      valorTotal: reaisFmt(chamado.valorTotalCent),
+      status: chamado.status,
+    } : {
+      chamadoId: chamado.id,
+      tipoChamado: 'viagem',
       solicitante: chamado.solicitante.nome,
       veiculo: (chamado.veiculo.placa + ' — ' + chamado.veiculo.modelo).trim(),
       condutor: chamado.condutor.nome,
+      rota: chamado.rota || '',
+      dataViagem: dataViagemFmt(chamado.dataViagem),
       valorTotal: reaisFmt(chamado.valorTotalCent),
       adiantamento: reaisFmt(chamado.adiantamentoCent),
       saldo: reaisFmt(chamado.saldoCent),
@@ -168,7 +229,7 @@ function verificarLembretes() {
   let mudou = false;
   const t = Date.now();
   for (const c of d.db.chamados) {
-    if (c.status === 'cancelado') continue;
+    if (c.status === 'cancelado' || c.tipo === 'compra') continue;
     if (!c.encerramentoConfirmadoEm || c.saldoPagoEm || c.lembreteSaldoEm) continue;
     if (t - Date.parse(c.encerramentoConfirmadoEm) < LEMBRETE_MS) continue;
     c.lembreteSaldoEm = d.agora();
@@ -323,60 +384,116 @@ rota('GET', '/api/chamados', null, (ctx) => {
 });
 
 rota('POST', '/api/chamados', null, (ctx) => {
-  const v = ctx.body.veiculo || {};
-  const c = ctx.body.condutor || {};
-  const veiculo = {
-    placa: txt(v.placa, 12).toUpperCase(),
-    modelo: txt(v.modelo, 80),
-    ano: txt(v.ano, 8),
-    km: txt(v.km, 12),
-  };
-  const condutor = {
-    nome: txt(c.nome, 80),
-    documento: txt(c.documento, 20),
-    cnh: txt(c.cnh, 20),
-    telefone: txt(c.telefone, 20),
-  };
+  const tipo = ctx.body.tipo === 'compra' ? 'compra' : 'viagem';
   const valorTotalCent = centavos(ctx.body.valorTotalCent);
-  if (!veiculo.placa) return erro(ctx.res, 400, 'Informe a placa do veículo.');
-  if (!veiculo.modelo) return erro(ctx.res, 400, 'Informe o modelo do veículo.');
-  if (!condutor.nome) return erro(ctx.res, 400, 'Informe o nome do condutor.');
   if (!valorTotalCent) return erro(ctx.res, 400, 'Informe um valor total válido (maior que zero).');
 
-  const adiantamentoCent = Math.round(valorTotalCent * 0.7);
-  const saldoCent = valorTotalCent - adiantamentoCent;
-  const chamado = {
+  const base = {
     id: d.novoIdChamado(),
+    tipo,
     criadoEm: d.agora(),
     solicitante: { id: ctx.usuario.id, nome: ctx.usuario.nome },
-    veiculo,
-    condutor,
     observacoes: txt(ctx.body.observacoes, 1000),
     valorTotalCent,
-    adiantamentoCent,
-    saldoCent,
-    status: 'aberto', // aberto → adiantamento_pago → viagem_encerrada → finalizado | cancelado
-    adiantamentoPagoEm: null,
-    encerramentoConfirmadoEm: null,
-    lembreteSaldoEm: null,
-    saldoPagoEm: null,
+    status: 'aberto',
     anexos: { entrada: [], saida: [] },
     historico: [],
   };
-  historico(chamado, ctx.usuario, 'Chamado aberto.',
-    'Valor total ' + reaisFmt(valorTotalCent) + ' · Adiantamento (70%) ' + reaisFmt(adiantamentoCent) +
-    ' · Saldo ' + reaisFmt(saldoCent));
-  d.db.chamados.push(chamado);
-  criarNotificacao(
-    'novo_chamado', chamado,
-    'Novo chamado ' + chamado.id + ' — ' + ctx.usuario.nome,
-    'Solicitante: ' + ctx.usuario.nome +
-      '. Veículo: ' + veiculo.placa + ' (' + veiculo.modelo + ')' +
-      '. Condutor: ' + condutor.nome +
-      '. Valor total: ' + reaisFmt(valorTotalCent) +
-      '. Adiantamento (70%): ' + reaisFmt(adiantamentoCent) +
-      '. Saldo: ' + reaisFmt(saldoCent) + '.'
-  );
+
+  let chamado;
+  if (tipo === 'compra') {
+    // Chamado de COMPRA: pagamento único, sem 70/30.
+    const compra = {
+      descricao: txt(ctx.body.compra && ctx.body.compra.descricao, 200),
+      fornecedor: txt(ctx.body.compra && ctx.body.compra.fornecedor, 120),
+    };
+    if (!compra.descricao) return erro(ctx.res, 400, 'Informe a descrição da compra.');
+    chamado = Object.assign(base, {
+      compra,
+      veiculo: null,
+      condutor: null,
+      rota: '',
+      dataViagem: null,
+      adiantamentoCent: 0,
+      saldoCent: 0,
+      adiantamentoPagoEm: null,
+      encerramentoConfirmadoEm: null,
+      lembreteSaldoEm: null,
+      saldoPagoEm: null,
+      compraPagaEm: null,
+      // aberto → finalizado (compra paga) | cancelado
+    });
+    historico(chamado, ctx.usuario, 'Chamado de compra aberto.',
+      compra.descricao + ' · Valor ' + reaisFmt(valorTotalCent));
+    d.db.chamados.push(chamado);
+    criarNotificacao(
+      'novo_chamado', chamado,
+      'Nova compra ' + chamado.id + ' — ' + ctx.usuario.nome,
+      'Solicitante: ' + ctx.usuario.nome +
+        '. Compra: ' + compra.descricao +
+        (compra.fornecedor ? '. Fornecedor: ' + compra.fornecedor : '') +
+        '. Valor: ' + reaisFmt(valorTotalCent) + '.'
+    );
+  } else {
+    // Chamado de VIAGEM (adiantamento 70/30).
+    const v = ctx.body.veiculo || {};
+    const c = ctx.body.condutor || {};
+    const placa = normPlaca(v.placa);
+    if (placa === '' || placa === null) {
+      return erro(ctx.res, 400, 'Placa inválida. Use o modelo brasileiro (ABC-1234) ou Mercosul (ABC1D23).');
+    }
+    const telefone = normTelefone(c.telefone);
+    if (telefone === null) return erro(ctx.res, 400, 'Telefone inválido. Use DDD + número: (00) 90000-0000.');
+    const documento = normCpf(c.documento);
+    if (documento === null) return erro(ctx.res, 400, 'CPF inválido. Digite os 11 números de um CPF válido.');
+    const cnh = normCnh(c.cnh);
+    if (cnh === null) return erro(ctx.res, 400, 'CNH inválida. Digite os 11 números do registro da CNH.');
+    const dataViagem = normDataViagem(ctx.body.dataViagem);
+    if (!dataViagem) return erro(ctx.res, 400, 'Informe a data da viagem.');
+    const veiculo = {
+      placa,
+      modelo: txt(v.modelo, 80),
+      ano: txt(v.ano, 8),
+      km: txt(v.km, 12).replace(/\D/g, ''),
+    };
+    const condutor = { nome: txt(c.nome, 80), documento, cnh, telefone };
+    if (!veiculo.modelo) return erro(ctx.res, 400, 'Informe o modelo do veículo.');
+    if (!condutor.nome) return erro(ctx.res, 400, 'Informe o nome do condutor.');
+
+    const adiantamentoCent = Math.round(valorTotalCent * 0.7);
+    const saldoCent = valorTotalCent - adiantamentoCent;
+    chamado = Object.assign(base, {
+      veiculo,
+      condutor,
+      rota: txt(ctx.body.rota, 200),
+      dataViagem,
+      adiantamentoCent,
+      saldoCent,
+      // aberto → adiantamento_pago → viagem_encerrada → finalizado | cancelado
+      adiantamentoPagoEm: null,
+      encerramentoConfirmadoEm: null,
+      lembreteSaldoEm: null,
+      saldoPagoEm: null,
+    });
+    historico(chamado, ctx.usuario, 'Chamado aberto.',
+      'Valor total ' + reaisFmt(valorTotalCent) + ' · Adiantamento (70%) ' + reaisFmt(adiantamentoCent) +
+      ' · Saldo ' + reaisFmt(saldoCent) +
+      ' · Viagem em ' + dataViagemFmt(dataViagem) +
+      (chamado.rota ? ' · Rota: ' + chamado.rota : ''));
+    d.db.chamados.push(chamado);
+    criarNotificacao(
+      'novo_chamado', chamado,
+      'Novo chamado ' + chamado.id + ' — ' + ctx.usuario.nome,
+      'Solicitante: ' + ctx.usuario.nome +
+        '. Veículo: ' + veiculo.placa + ' (' + veiculo.modelo + ')' +
+        '. Condutor: ' + condutor.nome +
+        '. Viagem: ' + dataViagemFmt(dataViagem) +
+        (chamado.rota ? '. Rota: ' + chamado.rota : '') +
+        '. Valor total: ' + reaisFmt(valorTotalCent) +
+        '. Adiantamento (70%): ' + reaisFmt(adiantamentoCent) +
+        '. Saldo: ' + reaisFmt(saldoCent) + '.'
+    );
+  }
   d.flush();
   notifyChange('chamados');
   sendJson(ctx.res, 200, { chamado });
@@ -392,6 +509,7 @@ rota('GET', '/api/chamados/:id', null, (ctx) => {
 rota('POST', '/api/chamados/:id/adiantamento-pago', ['financeiro', 'admin'], (ctx) => {
   const chamado = acharChamado(ctx.params.id);
   if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
+  if (chamado.tipo === 'compra') return erro(ctx.res, 400, 'Chamado de compra não tem adiantamento.');
   if (chamado.status === 'cancelado') return erro(ctx.res, 400, 'Chamado cancelado.');
   if (chamado.adiantamentoPagoEm) return erro(ctx.res, 400, 'Adiantamento já registrado como pago.');
   chamado.adiantamentoPagoEm = d.agora();
@@ -407,6 +525,7 @@ rota('POST', '/api/chamados/:id/encerrar-viagem', null, (ctx) => {
   const chamado = acharChamado(ctx.params.id);
   if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
   if (!podeVerChamado(ctx.usuario, chamado)) return erro(ctx.res, 403, 'Sem permissão.');
+  if (chamado.tipo === 'compra') return erro(ctx.res, 400, 'Chamado de compra não tem viagem para encerrar.');
   if (chamado.status === 'cancelado') return erro(ctx.res, 400, 'Chamado cancelado.');
   if (chamado.encerramentoConfirmadoEm) return erro(ctx.res, 400, 'Encerramento já confirmado.');
   chamado.encerramentoConfirmadoEm = d.agora();
@@ -428,6 +547,7 @@ rota('POST', '/api/chamados/:id/encerrar-viagem', null, (ctx) => {
 rota('POST', '/api/chamados/:id/saldo-pago', ['financeiro', 'admin'], (ctx) => {
   const chamado = acharChamado(ctx.params.id);
   if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
+  if (chamado.tipo === 'compra') return erro(ctx.res, 400, 'Chamado de compra não tem saldo 70/30.');
   if (chamado.status === 'cancelado') return erro(ctx.res, 400, 'Chamado cancelado.');
   if (chamado.saldoPagoEm) return erro(ctx.res, 400, 'Saldo já registrado como pago.');
   if (!chamado.encerramentoConfirmadoEm) return erro(ctx.res, 400, 'Confirme o encerramento da viagem antes de pagar o saldo.');
@@ -435,6 +555,22 @@ rota('POST', '/api/chamados/:id/saldo-pago', ['financeiro', 'admin'], (ctx) => {
   chamado.status = 'finalizado';
   historico(chamado, ctx.usuario, 'Saldo pago (' + reaisFmt(chamado.saldoCent) + '). Chamado finalizado.');
   reconhecerNotificacoesDoChamado(chamado.id, ctx.usuario, null); // encerra todos os avisos deste chamado
+  d.flush();
+  notifyChange('chamados');
+  sendJson(ctx.res, 200, { chamado });
+});
+
+// Compra: pagamento único registrado pelo financeiro.
+rota('POST', '/api/chamados/:id/compra-paga', ['financeiro', 'admin'], (ctx) => {
+  const chamado = acharChamado(ctx.params.id);
+  if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
+  if (chamado.tipo !== 'compra') return erro(ctx.res, 400, 'Este chamado não é de compra.');
+  if (chamado.status === 'cancelado') return erro(ctx.res, 400, 'Chamado cancelado.');
+  if (chamado.compraPagaEm) return erro(ctx.res, 400, 'Compra já registrada como paga.');
+  chamado.compraPagaEm = d.agora();
+  chamado.status = 'finalizado';
+  historico(chamado, ctx.usuario, 'Compra paga (' + reaisFmt(chamado.valorTotalCent) + '). Chamado finalizado.');
+  reconhecerNotificacoesDoChamado(chamado.id, ctx.usuario, null);
   d.flush();
   notifyChange('chamados');
   sendJson(ctx.res, 200, { chamado });
@@ -545,6 +681,25 @@ rota('POST', '/api/notificacoes/:id/reconhecer', ['financeiro', 'admin'], (ctx) 
     notifyChange('notificacoes');
   }
   sendJson(ctx.res, 200, { notificacao: n });
+});
+
+// ---- relatórios (apenas quem visualiza os chamados: financeiro/admin) --------
+rota('GET', '/api/relatorios/compras', ['financeiro', 'admin'], (ctx) => {
+  const compras = d.db.chamados
+    .filter((c) => c.tipo === 'compra')
+    .slice()
+    .sort((a, b) => (a.criadoEm < b.criadoEm ? 1 : -1))
+    .map((c) => ({
+      id: c.id,
+      criadoEm: c.criadoEm,
+      solicitante: c.solicitante.nome,
+      descricao: c.compra ? c.compra.descricao : '',
+      fornecedor: c.compra ? c.compra.fornecedor : '',
+      valorTotalCent: c.valorTotalCent,
+      status: c.status,
+      compraPagaEm: c.compraPagaEm || null,
+    }));
+  sendJson(ctx.res, 200, { compras });
 });
 
 // ---- backup ------------------------------------------------------------------

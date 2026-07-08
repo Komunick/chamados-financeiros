@@ -86,6 +86,13 @@ if (!db.seq) db.seq = { usuario: db.usuarios.length, chamado: 0, notificacao: 0,
 if (!Array.isArray(db.sessoes)) db.sessoes = [];
 if (!Array.isArray(db.notificacoes)) db.notificacoes = [];
 
+// Migração: chamados antigos (antes do tipo "compra") viram tipo "viagem".
+for (const c of db.chamados) {
+  if (!c.tipo) c.tipo = 'viagem';
+  if (c.dataViagem === undefined) c.dataViagem = null;
+  if (c.rota === undefined) c.rota = '';
+}
+
 // ---------------------------------------------------------------------------
 // Persistência atômica + snapshots.
 // ---------------------------------------------------------------------------

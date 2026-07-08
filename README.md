@@ -1,11 +1,27 @@
-# Sistema de Chamados Financeiros 🚛💰
+# Brazil Transports — Chamados Financeiros
 
-Sistema para adiantamento de viagens: o solicitante abre um chamado com os
-dados do **veículo**, do **condutor** e o **valor total**; o sistema calcula o
-**Adiantamento (70%)** e o **Saldo (30%)**, permite anexar **fotos de entrada e
-saída da viagem** e avisa o **financeiro** com notificações **insistentes na
-barra de tarefas do Windows** — inclusive o **lembrete automático de pagamento
-do saldo 5 dias após a confirmação de encerramento da viagem**.
+Sistema de chamados da **Brazil Transports** (visual com a logo e as cores
+verde/amarelo de novo.braziltransports.com.br) com dois tipos de chamado:
+
+- **Adiantamento de viagem** — o solicitante informa **veículo**,
+  **condutor**, **data da viagem**, **rota** e o **valor total**; o sistema
+  calcula o **Adiantamento (70%)** e o **Saldo (30%)**, permite anexar
+  **fotos de entrada e saída da viagem** e gera o **lembrete automático de
+  pagamento do saldo 5 dias após a confirmação de encerramento da viagem**;
+- **Compra** — pedido de compra com **descrição**, **fornecedor** e
+  **valor**, pago em **parcela única** pelo financeiro.
+
+Os dados cadastrados são **padronizados**: placa no modelo brasileiro
+(ABC-1234) ou Mercosul (ABC1D23), telefone brasileiro com DDD
+((00) 90000-0000), CPF com dígitos verificadores validados (000.000.000-00) e
+CNH com 11 números — os campos numéricos só aceitam números.
+
+Abas: **Chamados** (em andamento), **Histórico** (finalizados e
+cancelados), **Relatórios** (todas as compras agrupadas por dia com o
+**valor total do dia** — visível apenas para quem visualiza os chamados:
+financeiro/admin) e **Notificações**. O financeiro é avisado na **barra de
+tarefas do Windows apenas com as notificações novas** (cada aviso aparece uma
+única vez).
 
 Mesma arquitetura do Controle Patrimonial: servidor **Node puro, sem
 dependências** (não precisa de `npm install`), dados **fora da pasta web**,
@@ -56,25 +72,43 @@ opencode\
    Tailscale).
 3. Rode `INSTALAR-AUTOINICIO.bat` uma vez para o servidor subir sozinho no boot.
 4. Entre com **admin / admin123**, troque a senha e cadastre os usuários em
-   **👤 Usuários**:
+   **Usuários**:
    - **Solicitante** — quem abre os chamados;
    - **Financeiro** — quem recebe as notificações e registra os pagamentos.
 
 ## Como funciona o fluxo
 
-1. **Solicitante** abre o chamado preenchendo veículo (placa, modelo…),
-   condutor (nome, CPF, CNH…) e o **valor total**. O formulário já mostra a
-   prévia do 70/30.
-2. O chamado abre com duas abas principais:
-   - **💰 Adiantamento e saldo** — Adiantamento (70%) e Saldo (30%), cada um
+### Chamado de viagem
+
+1. **Solicitante** abre o chamado escolhendo o tipo **Adiantamento de
+   viagem** e preenchendo veículo (placa BR/Mercosul, modelo…), **data da
+   viagem**, **rota** (ex.: São Paulo → Curitiba), condutor (nome, CPF, CNH,
+   telefone — todos com máscara e validação) e o **valor total**. O
+   formulário já mostra a prévia do 70/30.
+2. O chamado abre com as abas:
+   - **Adiantamento e saldo** — Adiantamento (70%) e Saldo (30%), cada um
      com situação Pendente/Pago;
-   - **📷 Anexos da viagem** — fotos de **entrada** e de **saída** da viagem.
-3. **Financeiro** recebe na hora a notificação com nome do solicitante,
-   veículo, condutor e valores. Ele marca **Adiantamento pago**.
+   - **Anexos da viagem** — fotos de **entrada** e de **saída** da viagem.
+3. **Financeiro** recebe na hora a notificação com solicitante, veículo,
+   condutor, data, rota e valores. Ele marca **Adiantamento pago**.
 4. Ao fim da viagem, qualquer um dos dois confirma **Encerramento da viagem**.
 5. **5 dias depois**, o sistema gera sozinho o **lembrete de pagamento do
-   saldo**, que também vira aviso insistente na barra de tarefas até o saldo
-   ser pago (ou o aviso ser marcado como visto em 🔔 Notificações).
+   saldo**, que também vira aviso na barra de tarefas (uma única vez) e fica
+   pendente em Notificações até ser marcado como visto.
+
+### Chamado de compra
+
+1. **Solicitante** escolhe o tipo **Compra** e preenche **o que será
+   comprado**, o **fornecedor** (opcional) e o **valor** (pagamento único,
+   sem 70/30).
+2. **Financeiro** recebe a notificação, faz a compra e marca **Compra paga**
+   — o chamado é finalizado.
+3. Todas as compras aparecem em **Relatórios**, agrupadas por dia com o
+   **valor total de cada dia** (compras canceladas não somam). A aba é
+   restrita a financeiro/admin.
+
+Chamados finalizados ou cancelados saem da lista principal e ficam na aba
+**Histórico**, com busca e filtro.
 
 ## Notificações na barra de tarefas (máquina do financeiro)
 
@@ -90,15 +124,20 @@ acesse pela rede) e:
 
 O notificador consulta o servidor a cada 30 s e mostra um **balão nativo do
 Windows** (canto da barra de tarefas + central de notificações) com todos os
-dados do chamado. O aviso **repete a cada 5 minutos** enquanto ninguém marcar
-como visto no sistema — por isso "insistente". O botão **Abrir sistema** do
-balão abre o navegador direto no app. Requisito: Node instalado na máquina
-(o mesmo instalador usado no servidor serve).
+dados do chamado. Só aparecem as **notificações novas**: cada aviso é exibido
+**uma única vez** — o que já foi avisado fica registrado em `avisadas.json`,
+então nem reiniciar o notificador repete avisos antigos (na primeira execução,
+as notificações já existentes são registradas sem balão). O botão **Abrir
+sistema** do balão abre o navegador direto no app. Requisito: Node instalado
+na máquina (o mesmo instalador usado no servidor serve).
+
+> Atualizou o notificador? Copie a pasta `notificador\` de novo para a
+> máquina do financeiro e reinicie-o para valer a regra de "só novas".
 
 > Observação: notificações de navegador (Chrome/Edge) só funcionam em
 > localhost/HTTPS; como o acesso é por IP (http), é o notificador quem garante
 > o aviso na barra de tarefas. Dentro do app também aparecem avisos na tela e
-> um sino 🔔 com contador.
+> um sino com contador.
 
 ## Detalhes técnicos
 

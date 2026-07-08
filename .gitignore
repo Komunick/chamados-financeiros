@@ -3,6 +3,8 @@ chamados-data/
 notificador/config.json
 notificador/*.log
 *.log
+notificador/toast-tmp.ps1
+notificador/avisadas.json
 
 # Node (caso futuro use node_modules)
 node_modules/
