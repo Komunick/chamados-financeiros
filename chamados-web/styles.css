@@ -233,6 +233,7 @@ table.lista th {
 table.lista tbody tr { cursor: pointer; }
 table.lista tbody tr:hover { background: var(--primario-fundo); }
 .vazio { text-align: center; padding: 44px 10px; color: var(--mudo); font-family: var(--serifa); font-style: italic; }
+table.lista td.aud-detalhe { white-space: normal; min-width: 240px; max-width: 460px; }
 
 /* ---------- chips de status e tipo (etiquetas tipográficas) ---------- */
 .chip {

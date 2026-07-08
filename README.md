@@ -23,9 +23,13 @@ das viagens e o total das compras**, três listas — **só viagens**, **só
 compras** e a **combinada por dia** — além do **valor do dia** e do **valor
 futuro** (com destaque para os **próximos 7 dias**): compras contam no dia
 da abertura e viagens na **data da viagem**, então viagens agendadas
-aparecem marcadas como **futuras**. O financeiro é avisado na **barra de
-tarefas do Windows apenas com as notificações novas** (cada aviso aparece uma
-única vez).
+aparecem marcadas como **futuras**. A aba **Auditoria** (também restrita ao
+financeiro) guarda a trilha de **todos os acessos e alterações**: logins
+(inclusive tentativas recusadas), abertura de chamados, pagamentos,
+encerramentos, cancelamentos, anexos, notificações vistas e gestão de
+usuários — cada registro com **usuário, data/hora e IP** (últimos 5.000
+eventos). O financeiro é avisado na **barra de tarefas do Windows apenas com
+as notificações novas** (cada aviso aparece uma única vez).
 
 Mesma arquitetura do Controle Patrimonial: servidor **Node puro, sem
 dependências** (não precisa de `npm install`), dados **fora da pasta web**,

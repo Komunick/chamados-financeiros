@@ -77,14 +77,17 @@ if (!db) {
     sessoes: [],
     chamados: [],
     notificacoes: [],
-    seq: { usuario: 0, chamado: 0, notificacao: 0, anexo: 0 },
+    auditoria: [],
+    seq: { usuario: 0, chamado: 0, notificacao: 0, anexo: 0, auditoria: 0 },
   };
   db.usuarios.push(criarUsuarioObj('Administrador', 'admin', 'admin123', 'admin'));
   console.log('[Chamados] primeira execução: usuário admin/admin123 criado (troque a senha!).');
 }
-if (!db.seq) db.seq = { usuario: db.usuarios.length, chamado: 0, notificacao: 0, anexo: 0 };
+if (!db.seq) db.seq = { usuario: db.usuarios.length, chamado: 0, notificacao: 0, anexo: 0, auditoria: 0 };
+if (!db.seq.auditoria) db.seq.auditoria = 0;
 if (!Array.isArray(db.sessoes)) db.sessoes = [];
 if (!Array.isArray(db.notificacoes)) db.notificacoes = [];
+if (!Array.isArray(db.auditoria)) db.auditoria = [];
 
 // Migração: chamados antigos (antes do tipo "compra") viram tipo "viagem".
 for (const c of db.chamados) {
@@ -180,6 +183,7 @@ function encerrarSessao(token) {
 function novoIdChamado() { return 'CH-' + String(++db.seq.chamado).padStart(6, '0'); }
 function novoIdNotificacao() { return 'N-' + String(++db.seq.notificacao).padStart(6, '0'); }
 function novoIdAnexo() { return 'AX-' + String(++db.seq.anexo).padStart(6, '0'); }
+function novoIdAuditoria() { return 'A-' + String(++db.seq.auditoria).padStart(6, '0'); }
 
 module.exports = {
   db,
@@ -200,4 +204,5 @@ module.exports = {
   novoIdChamado,
   novoIdNotificacao,
   novoIdAnexo,
+  novoIdAuditoria,
 };

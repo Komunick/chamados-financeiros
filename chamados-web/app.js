@@ -12,6 +12,7 @@
     notificacoes: [],
     abaDetalhe: 'financeiro',
     abaRelatorio: 'dia',
+    filtroBuscaAud: '',
     filtroStatus: '',
     filtroBusca: '',
     filtroStatusHist: '',
@@ -248,6 +249,7 @@
     ];
     if (ehFinanceiro()) links.push(['#/relatorios', 'Relatórios']);
     if (ehFinanceiro()) links.push(['#/notificacoes', 'Notificações']);
+    if (ehFinanceiro()) links.push(['#/auditoria', 'Auditoria']);
     if (ehAdmin()) links.push(['#/usuarios', 'Usuários']);
     for (const [href, rotulo] of links) {
       const a = el('a', { href }, rotulo);
@@ -266,6 +268,7 @@
       if (rota === '/historico') return await renderHistorico(cont);
       if (rota === '/relatorios' && ehFinanceiro()) return await renderRelatorios(cont);
       if (rota === '/notificacoes' && ehFinanceiro()) return await renderNotificacoes(cont);
+      if (rota === '/auditoria' && ehFinanceiro()) return await renderAuditoria(cont);
       if (rota === '/usuarios' && ehAdmin()) return await renderUsuarios(cont);
       const m = rota.match(/^\/chamado\/(.+)$/);
       if (m) return await renderDetalhe(cont, decodeURIComponent(m[1]));
@@ -985,6 +988,61 @@
       cartao.append(item);
     }
     cont.append(cartao);
+  }
+
+  // ------------------------------------------------------------------ auditoria (financeiro/admin)
+  async function renderAuditoria(cont) {
+    const r = await api('GET', '/api/auditoria');
+    cont.innerHTML = '';
+    const eventos = r.eventos || [];
+
+    const quemFez = (e) => {
+      if (e.usuario) return e.usuario.nome + ' (' + e.usuario.papel + ')';
+      return /recusad/i.test(e.acao) ? 'Não autenticado' : 'Sistema';
+    };
+
+    const busca = el('input', {
+      type: 'search', placeholder: 'Buscar por usuário, ação, chamado…',
+      value: state.filtroBuscaAud,
+      oninput: (ev) => { state.filtroBuscaAud = ev.target.value; desenhar(); },
+    });
+    const envolta = el('div', { class: 'tabela-envolta' });
+    cont.append(el('div', { class: 'cartao' },
+      el('div', { class: 'linha-topo' }, el('h2', null, 'Auditoria')),
+      el('p', { class: 'mudo' },
+        'Trilha de todos os acessos e alterações no sistema: logins (inclusive recusados), abertura de chamados, pagamentos, encerramentos, cancelamentos, anexos, notificações vistas e gestão de usuários — com usuário, data e hora. Visível apenas para o financeiro. Últimos ' + eventos.length + ' registros.'),
+      el('div', { class: 'filtros' }, busca),
+      envolta));
+
+    function desenhar() {
+      const b = state.filtroBuscaAud.trim().toLowerCase();
+      let lista = eventos;
+      if (b) {
+        lista = lista.filter((e) =>
+          [e.id, e.acao, e.detalhe || '', quemFez(e), e.ip || '', fmtData(e.em)]
+            .join(' ').toLowerCase().includes(b));
+      }
+      envolta.innerHTML = '';
+      if (!lista.length) {
+        envolta.append(el('div', { class: 'vazio' }, 'Nenhum registro de auditoria encontrado.'));
+        return;
+      }
+      const tabela = el('table', { class: 'lista' },
+        el('thead', null, el('tr', null,
+          ...['Data e hora', 'Usuário', 'Ação', 'Detalhe', 'IP'].map((h) => el('th', null, h)))));
+      const tbody = el('tbody');
+      for (const e of lista) {
+        tbody.append(el('tr', { style: 'cursor:default' },
+          el('td', { class: 'mudo' }, fmtData(e.em)),
+          el('td', null, el('strong', null, quemFez(e))),
+          el('td', null, e.acao),
+          el('td', { class: 'aud-detalhe' }, e.detalhe || '—'),
+          el('td', { class: 'mudo' }, e.ip || '—')));
+      }
+      tabela.append(tbody);
+      envolta.append(tabela);
+    }
+    desenhar();
   }
 
   // ------------------------------------------------------------------ usuários (admin)

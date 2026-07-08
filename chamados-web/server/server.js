@@ -176,6 +176,26 @@ function historico(chamado, usuario, acao, detalhe) {
 }
 
 // ---------------------------------------------------------------------------
+// Auditoria: trilha de todos os acessos e alterações (quem, o quê, quando,
+// de onde). Visível apenas para financeiro/admin. Não grava sozinha — cada
+// ponto de chamada já faz d.flush() logo em seguida.
+// ---------------------------------------------------------------------------
+function auditar(usuario, acao, detalhe, ip) {
+  d.db.auditoria.push({
+    id: d.novoIdAuditoria(),
+    em: d.agora(),
+    usuario: usuario
+      ? { id: usuario.id, nome: usuario.nome, login: usuario.login, papel: usuario.papel }
+      : null, // null = sistema ou acesso não autenticado (ver "acao")
+    acao,
+    detalhe: detalhe || null,
+    ip: ip || null,
+  });
+  // Mantém a trilha com tamanho limitado.
+  if (d.db.auditoria.length > 5000) d.db.auditoria = d.db.auditoria.slice(-4000);
+}
+
+// ---------------------------------------------------------------------------
 // Notificações (para o financeiro / notificador de bandeja).
 // ---------------------------------------------------------------------------
 function criarNotificacao(tipo, chamado, titulo, mensagem) {
@@ -241,6 +261,7 @@ function verificarLembretes() {
         '. Veículo: ' + c.veiculo.placa + '. Condutor: ' + c.condutor.nome + '.'
     );
     historico(c, null, 'Lembrete de pagamento do saldo gerado (5 dias após o encerramento).');
+    auditar(null, 'Lembrete de saldo gerado (automático)', c.id + ' · ' + reaisFmt(c.saldoCent), null);
     mudou = true;
   }
   if (mudou) { d.flush(); notifyChange('notificacoes'); }
@@ -282,15 +303,19 @@ rota('POST', '/api/auth/login', ['anon'], (ctx) => {
   const u = d.db.usuarios.find((x) => x.login === login);
   if (!u || d.hashSenha(senha, u.sal) !== u.senhaHash) {
     registrarFalhaLogin(ctx.ip);
+    auditar(null, 'Tentativa de login recusada', 'Login informado: ' + (login || '(vazio)'), ctx.ip);
+    d.flush();
     return erro(ctx.res, 401, 'Login ou senha inválidos.');
   }
   limparFalhasLogin(ctx.ip);
-  const token = d.criarSessao(u);
+  auditar(u, 'Entrou no sistema (login)', null, ctx.ip);
+  const token = d.criarSessao(u); // criarSessao grava no disco (inclui a auditoria)
   sendJson(ctx.res, 200, { token, usuario: publicoUsuario(u) });
 });
 
 rota('POST', '/api/auth/logout', null, (ctx) => {
-  d.encerrarSessao(ctx.token);
+  auditar(ctx.usuario, 'Saiu do sistema (logout)', null, ctx.ip);
+  d.encerrarSessao(ctx.token); // grava no disco
   sendJson(ctx.res, 200, { ok: true });
 });
 
@@ -305,6 +330,7 @@ rota('POST', '/api/auth/trocar-senha', null, (ctx) => {
   if (nova.length < 6) return erro(ctx.res, 400, 'A nova senha precisa ter ao menos 6 caracteres.');
   ctx.usuario.sal = d.novoSal();
   ctx.usuario.senhaHash = d.hashSenha(nova, ctx.usuario.sal);
+  auditar(ctx.usuario, 'Trocou a própria senha', null, ctx.ip);
   d.flush();
   sendJson(ctx.res, 200, { ok: true });
 });
@@ -326,6 +352,7 @@ rota('POST', '/api/usuarios', ['admin'], (ctx) => {
   if (d.db.usuarios.some((u) => u.login === login)) return erro(ctx.res, 409, 'Já existe um usuário com esse login.');
   const u = d.criarUsuarioObj(nome, login, senha, papel);
   d.db.usuarios.push(u);
+  auditar(ctx.usuario, 'Criou usuário', nome + ' (' + login + ', papel ' + papel + ')', ctx.ip);
   d.flush();
   notifyChange('usuarios');
   sendJson(ctx.res, 200, { usuario: publicoUsuario(u) });
@@ -334,7 +361,11 @@ rota('POST', '/api/usuarios', ['admin'], (ctx) => {
 rota('PUT', '/api/usuarios/:id', ['admin'], (ctx) => {
   const u = d.db.usuarios.find((x) => x.id === ctx.params.id);
   if (!u) return erro(ctx.res, 404, 'Usuário não encontrado.');
-  if (ctx.body.nome !== undefined) u.nome = txt(ctx.body.nome, 80) || u.nome;
+  const mudancas = [];
+  if (ctx.body.nome !== undefined) {
+    u.nome = txt(ctx.body.nome, 80) || u.nome;
+    mudancas.push('nome');
+  }
   if (ctx.body.papel !== undefined) {
     if (!['solicitante', 'financeiro', 'admin'].includes(ctx.body.papel)) return erro(ctx.res, 400, 'Papel inválido.');
     if (u.papel === 'admin' && ctx.body.papel !== 'admin' &&
@@ -342,12 +373,15 @@ rota('PUT', '/api/usuarios/:id', ['admin'], (ctx) => {
       return erro(ctx.res, 400, 'Não é possível rebaixar o único admin.');
     }
     u.papel = ctx.body.papel;
+    mudancas.push('papel → ' + u.papel);
   }
   if (ctx.body.novaSenha) {
     if (String(ctx.body.novaSenha).length < 6) return erro(ctx.res, 400, 'A senha precisa ter ao menos 6 caracteres.');
     u.sal = d.novoSal();
     u.senhaHash = d.hashSenha(String(ctx.body.novaSenha), u.sal);
+    mudancas.push('senha');
   }
+  auditar(ctx.usuario, 'Alterou usuário', u.nome + ' (' + u.login + '): ' + (mudancas.join(', ') || 'sem mudanças'), ctx.ip);
   d.flush();
   notifyChange('usuarios');
   sendJson(ctx.res, 200, { usuario: publicoUsuario(u) });
@@ -362,6 +396,7 @@ rota('DELETE', '/api/usuarios/:id', ['admin'], (ctx) => {
   }
   d.db.usuarios = d.db.usuarios.filter((x) => x.id !== u.id);
   d.db.sessoes = d.db.sessoes.filter((s) => s.usuarioId !== u.id);
+  auditar(ctx.usuario, 'Removeu usuário', u.nome + ' (' + u.login + ', papel ' + u.papel + ')', ctx.ip);
   d.flush();
   notifyChange('usuarios');
   sendJson(ctx.res, 200, { ok: true });
@@ -426,6 +461,9 @@ rota('POST', '/api/chamados', null, (ctx) => {
     historico(chamado, ctx.usuario, 'Chamado de compra aberto.',
       compra.descricao + ' · Valor ' + reaisFmt(valorTotalCent));
     d.db.chamados.push(chamado);
+    auditar(ctx.usuario, 'Abriu chamado de compra ' + chamado.id,
+      compra.descricao + (compra.fornecedor ? ' · Fornecedor: ' + compra.fornecedor : '') +
+      ' · ' + reaisFmt(valorTotalCent), ctx.ip);
     criarNotificacao(
       'novo_chamado', chamado,
       'Nova compra ' + chamado.id + ' — ' + ctx.usuario.nome,
@@ -481,6 +519,9 @@ rota('POST', '/api/chamados', null, (ctx) => {
       ' · Viagem em ' + dataViagemFmt(dataViagem) +
       (chamado.rota ? ' · Rota: ' + chamado.rota : ''));
     d.db.chamados.push(chamado);
+    auditar(ctx.usuario, 'Abriu chamado de viagem ' + chamado.id,
+      veiculo.placa + ' · ' + condutor.nome + ' · viagem ' + dataViagemFmt(dataViagem) +
+      (chamado.rota ? ' · ' + chamado.rota : '') + ' · ' + reaisFmt(valorTotalCent), ctx.ip);
     criarNotificacao(
       'novo_chamado', chamado,
       'Novo chamado ' + chamado.id + ' — ' + ctx.usuario.nome,
@@ -516,6 +557,7 @@ rota('POST', '/api/chamados/:id/adiantamento-pago', ['financeiro', 'admin'], (ct
   if (chamado.status === 'aberto') chamado.status = 'adiantamento_pago';
   historico(chamado, ctx.usuario, 'Adiantamento pago (' + reaisFmt(chamado.adiantamentoCent) + ').');
   reconhecerNotificacoesDoChamado(chamado.id, ctx.usuario, ['novo_chamado']);
+  auditar(ctx.usuario, 'Marcou adiantamento como pago', chamado.id + ' · ' + reaisFmt(chamado.adiantamentoCent), ctx.ip);
   d.flush();
   notifyChange('chamados');
   sendJson(ctx.res, 200, { chamado });
@@ -539,6 +581,7 @@ rota('POST', '/api/chamados/:id/encerrar-viagem', null, (ctx) => {
     ctx.usuario.nome + ' confirmou o encerramento da viagem. Saldo de ' + reaisFmt(chamado.saldoCent) +
       ' a pagar. Lembrete automático em ' + dataLembrete.toLocaleDateString('pt-BR') + ' (5 dias).'
   );
+  auditar(ctx.usuario, 'Confirmou encerramento da viagem', chamado.id + ' · saldo ' + reaisFmt(chamado.saldoCent) + ' a pagar', ctx.ip);
   d.flush();
   notifyChange('chamados');
   sendJson(ctx.res, 200, { chamado });
@@ -555,6 +598,7 @@ rota('POST', '/api/chamados/:id/saldo-pago', ['financeiro', 'admin'], (ctx) => {
   chamado.status = 'finalizado';
   historico(chamado, ctx.usuario, 'Saldo pago (' + reaisFmt(chamado.saldoCent) + '). Chamado finalizado.');
   reconhecerNotificacoesDoChamado(chamado.id, ctx.usuario, null); // encerra todos os avisos deste chamado
+  auditar(ctx.usuario, 'Marcou saldo como pago (chamado finalizado)', chamado.id + ' · ' + reaisFmt(chamado.saldoCent), ctx.ip);
   d.flush();
   notifyChange('chamados');
   sendJson(ctx.res, 200, { chamado });
@@ -571,6 +615,7 @@ rota('POST', '/api/chamados/:id/compra-paga', ['financeiro', 'admin'], (ctx) => 
   chamado.status = 'finalizado';
   historico(chamado, ctx.usuario, 'Compra paga (' + reaisFmt(chamado.valorTotalCent) + '). Chamado finalizado.');
   reconhecerNotificacoesDoChamado(chamado.id, ctx.usuario, null);
+  auditar(ctx.usuario, 'Marcou compra como paga (chamado finalizado)', chamado.id + ' · ' + reaisFmt(chamado.valorTotalCent), ctx.ip);
   d.flush();
   notifyChange('chamados');
   sendJson(ctx.res, 200, { chamado });
@@ -583,6 +628,7 @@ rota('POST', '/api/chamados/:id/cancelar', ['admin'], (ctx) => {
   chamado.status = 'cancelado';
   historico(chamado, ctx.usuario, 'Chamado cancelado.', txt(ctx.body.motivo, 300) || null);
   reconhecerNotificacoesDoChamado(chamado.id, ctx.usuario, null);
+  auditar(ctx.usuario, 'Cancelou chamado', chamado.id + (txt(ctx.body.motivo, 300) ? ' · motivo: ' + txt(ctx.body.motivo, 300) : ''), ctx.ip);
   d.flush();
   notifyChange('chamados');
   sendJson(ctx.res, 200, { chamado });
@@ -622,6 +668,7 @@ rota('POST', '/api/chamados/:id/anexos', null, (ctx) => {
   };
   chamado.anexos[tipo].push(anexo);
   historico(chamado, ctx.usuario, 'Foto de ' + (tipo === 'entrada' ? 'entrada' : 'saída') + ' anexada.', anexo.nome);
+  auditar(ctx.usuario, 'Anexou foto de ' + (tipo === 'entrada' ? 'entrada' : 'saída'), chamado.id + ' · ' + anexo.nome, ctx.ip);
   d.flush();
   notifyChange('chamados');
   sendJson(ctx.res, 200, { anexo, chamado });
@@ -652,6 +699,7 @@ rota('DELETE', '/api/chamados/:id/anexos/:anexoId', null, (ctx) => {
       chamado.anexos[tipo].splice(i, 1);
       try { fs.unlinkSync(path.join(d.ANEXOS_DIR, chamado.id, anexo.id + anexo.ext)); } catch (e) { /* ignore */ }
       historico(chamado, ctx.usuario, 'Foto de ' + (tipo === 'entrada' ? 'entrada' : 'saída') + ' removida.', anexo.nome);
+      auditar(ctx.usuario, 'Removeu foto de ' + (tipo === 'entrada' ? 'entrada' : 'saída'), chamado.id + ' · ' + anexo.nome, ctx.ip);
       d.flush();
       notifyChange('chamados');
       return sendJson(ctx.res, 200, { ok: true, chamado });
@@ -677,6 +725,7 @@ rota('POST', '/api/notificacoes/:id/reconhecer', ['financeiro', 'admin'], (ctx) 
   if (!n) return erro(ctx.res, 404, 'Notificação não encontrada.');
   if (!n.reconhecidaPor) {
     n.reconhecidaPor = { id: ctx.usuario.id, nome: ctx.usuario.nome, em: d.agora() };
+    auditar(ctx.usuario, 'Marcou notificação como vista', n.id + ' · ' + n.titulo, ctx.ip);
     d.flush();
     notifyChange('notificacoes');
   }
@@ -706,6 +755,12 @@ rota('GET', '/api/relatorios/movimento', ['financeiro', 'admin'], (ctx) => {
       status: c.status,
     }));
   sendJson(ctx.res, 200, { itens });
+});
+
+// ---- auditoria (apenas financeiro/admin) --------------------------------------
+rota('GET', '/api/auditoria', ['financeiro', 'admin'], (ctx) => {
+  const eventos = d.db.auditoria.slice(-500).reverse(); // mais recentes primeiro
+  sendJson(ctx.res, 200, { eventos });
 });
 
 // ---- backup ------------------------------------------------------------------
