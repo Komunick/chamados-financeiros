@@ -1,0 +1,666 @@
+'use strict';
+/*
+ * Chamados Financeiros — servidor HTTP (base compartilhada).
+ * ---------------------------------------------------------------------------
+ * Node puro, SEM dependências externas (não precisa de npm install).
+ *  - Serve os arquivos estáticos do app (index.html, app.js, styles.css).
+ *  - API /api/* : autenticação, chamados, anexos (fotos), notificações, usuários.
+ *  - SSE em /api/events para atualização em tempo real dos navegadores.
+ *  - Verificador periódico: 5 dias após a confirmação de encerramento da
+ *    viagem, gera a notificação de lembrete do pagamento do saldo.
+ *
+ * Papéis: solicitante (abre chamados), financeiro (recebe notificações e
+ * registra pagamentos), admin (tudo + usuários).
+ */
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const d = require('./db');
+
+const PORT = parseInt(process.env.PORT, 10) || 8090;
+const HOST = process.env.HOST || '0.0.0.0';
+const ROOT = path.join(__dirname, '..'); // pasta chamados-web (arquivos do app)
+
+// 5 dias por padrão; CHAMADOS_LEMBRETE_MS permite encurtar em testes.
+const LEMBRETE_MS = parseInt(process.env.CHAMADOS_LEMBRETE_MS, 10) || 5 * 24 * 60 * 60 * 1000;
+const BODY_LIMIT = parseInt(process.env.CHAMADOS_BODY_LIMIT, 10) || 25 * 1024 * 1024; // 25 MB (fotos em base64)
+const ANEXO_MAX = 12 * 1024 * 1024; // 12 MB por imagem (binário)
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+};
+const IMAGENS = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+};
+
+function send(res, status, body, headers) {
+  res.writeHead(status, headers || {});
+  res.end(body);
+}
+function sendJson(res, status, obj) {
+  send(res, status, JSON.stringify(obj), { 'Content-Type': 'application/json; charset=utf-8' });
+}
+function erro(res, status, msg) { sendJson(res, status, { error: msg }); }
+
+// ---------------------------------------------------------------------------
+// Tempo real (Server-Sent Events).
+// ---------------------------------------------------------------------------
+const sseClients = new Set();
+let revision = 0;
+
+function handleSSE(req, res, query) {
+  const usuario = d.usuarioPorToken(query.get('token'));
+  if (!usuario) return erro(res, 401, 'Sessão inválida.');
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write('retry: 3000\n\n');
+  res.write(': conectado\n\n');
+  sseClients.add(res);
+  const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch (e) { /* ignore */ } }, 25000);
+  const done = () => { clearInterval(ping); sseClients.delete(res); };
+  req.on('close', done);
+  req.on('error', done);
+}
+
+function broadcast(evt) {
+  const payload = 'data: ' + JSON.stringify(evt) + '\n\n';
+  for (const res of sseClients) {
+    try { res.write(payload); } catch (e) { sseClients.delete(res); }
+  }
+}
+
+function notifyChange(recurso) {
+  revision += 1;
+  broadcast({ tipo: 'mudanca', rev: revision, recurso });
+}
+
+// ---------------------------------------------------------------------------
+// Utilidades de validação.
+// ---------------------------------------------------------------------------
+function txt(v, max) {
+  if (v === null || v === undefined) return '';
+  return String(v).trim().slice(0, max || 200);
+}
+function centavos(v) {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n) || n <= 0 || n > 100000000000) return null; // até R$ 1 bilhão
+  return n;
+}
+function reaisFmt(cent) {
+  return (cent / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+function dataFmt(iso) {
+  if (!iso) return '';
+  const dt = new Date(iso);
+  return dt.toLocaleDateString('pt-BR') + ' ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function publicoUsuario(u) {
+  return { id: u.id, nome: u.nome, login: u.login, papel: u.papel, criadoEm: u.criadoEm };
+}
+
+function acharChamado(id) {
+  return d.db.chamados.find((c) => c.id === id) || null;
+}
+
+function historico(chamado, usuario, acao, detalhe) {
+  chamado.historico.push({ em: d.agora(), por: usuario ? usuario.nome : 'sistema', acao, detalhe: detalhe || null });
+}
+
+// ---------------------------------------------------------------------------
+// Notificações (para o financeiro / notificador de bandeja).
+// ---------------------------------------------------------------------------
+function criarNotificacao(tipo, chamado, titulo, mensagem) {
+  const n = {
+    id: d.novoIdNotificacao(),
+    em: d.agora(),
+    tipo, // 'novo_chamado' | 'viagem_encerrada' | 'lembrete_saldo'
+    chamadoId: chamado.id,
+    titulo,
+    mensagem,
+    dados: {
+      chamadoId: chamado.id,
+      solicitante: chamado.solicitante.nome,
+      veiculo: (chamado.veiculo.placa + ' — ' + chamado.veiculo.modelo).trim(),
+      condutor: chamado.condutor.nome,
+      valorTotal: reaisFmt(chamado.valorTotalCent),
+      adiantamento: reaisFmt(chamado.adiantamentoCent),
+      saldo: reaisFmt(chamado.saldoCent),
+      status: chamado.status,
+    },
+    reconhecidaPor: null,
+  };
+  d.db.notificacoes.push(n);
+  // Mantém no máximo 500 notificações no histórico.
+  if (d.db.notificacoes.length > 500) d.db.notificacoes = d.db.notificacoes.slice(-400);
+  broadcast({ tipo: 'notificacao', notificacao: n });
+  return n;
+}
+
+function reconhecerNotificacoesDoChamado(chamadoId, usuario, tipos) {
+  for (const n of d.db.notificacoes) {
+    if (n.chamadoId === chamadoId && !n.reconhecidaPor && (!tipos || tipos.includes(n.tipo))) {
+      n.reconhecidaPor = { id: usuario ? usuario.id : 'sistema', nome: usuario ? usuario.nome : 'sistema', em: d.agora() };
+    }
+  }
+}
+
+// Lembrete do saldo: 5 dias após a confirmação de encerramento da viagem.
+function verificarLembretes() {
+  let mudou = false;
+  const t = Date.now();
+  for (const c of d.db.chamados) {
+    if (c.status === 'cancelado') continue;
+    if (!c.encerramentoConfirmadoEm || c.saldoPagoEm || c.lembreteSaldoEm) continue;
+    if (t - Date.parse(c.encerramentoConfirmadoEm) < LEMBRETE_MS) continue;
+    c.lembreteSaldoEm = d.agora();
+    criarNotificacao(
+      'lembrete_saldo', c,
+      'Lembrete: pagar saldo do chamado ' + c.id,
+      'A viagem foi encerrada em ' + dataFmt(c.encerramentoConfirmadoEm) + ' (há 5 dias). ' +
+        'Saldo a pagar: ' + reaisFmt(c.saldoCent) + '. Solicitante: ' + c.solicitante.nome +
+        '. Veículo: ' + c.veiculo.placa + '. Condutor: ' + c.condutor.nome + '.'
+    );
+    historico(c, null, 'Lembrete de pagamento do saldo gerado (5 dias após o encerramento).');
+    mudou = true;
+  }
+  if (mudou) { d.flush(); notifyChange('notificacoes'); }
+}
+
+// ---------------------------------------------------------------------------
+// Proteção simples contra força bruta no login (por IP).
+// ---------------------------------------------------------------------------
+const tentativas = new Map(); // ip -> { falhas, bloqueadoAte }
+function loginBloqueado(ip) {
+  const t = tentativas.get(ip);
+  return !!(t && t.bloqueadoAte && t.bloqueadoAte > Date.now());
+}
+function registrarFalhaLogin(ip) {
+  const t = tentativas.get(ip) || { falhas: 0, bloqueadoAte: 0 };
+  t.falhas += 1;
+  if (t.falhas >= 5) { t.bloqueadoAte = Date.now() + 60 * 1000; t.falhas = 0; }
+  tentativas.set(ip, t);
+}
+function limparFalhasLogin(ip) { tentativas.delete(ip); }
+
+// ---------------------------------------------------------------------------
+// Rotas da API.
+// ---------------------------------------------------------------------------
+// handler(ctx) — ctx = { req, res, usuario, body, params, query, ip }
+// papeis: null = qualquer usuário autenticado; [] com 'anon' = sem login.
+const rotas = [];
+function rota(metodo, padrao, papeis, handler) {
+  const keys = [];
+  const re = new RegExp('^' + padrao.replace(/:[a-zA-Z]+/g, (m) => { keys.push(m.slice(1)); return '([^/]+)'; }) + '$');
+  rotas.push({ metodo, re, keys, papeis, handler });
+}
+
+// ---- autenticação ----------------------------------------------------------
+rota('POST', '/api/auth/login', ['anon'], (ctx) => {
+  if (loginBloqueado(ctx.ip)) return erro(ctx.res, 429, 'Muitas tentativas. Aguarde 1 minuto.');
+  const login = txt(ctx.body.login, 60).toLowerCase();
+  const senha = String(ctx.body.senha || '');
+  const u = d.db.usuarios.find((x) => x.login === login);
+  if (!u || d.hashSenha(senha, u.sal) !== u.senhaHash) {
+    registrarFalhaLogin(ctx.ip);
+    return erro(ctx.res, 401, 'Login ou senha inválidos.');
+  }
+  limparFalhasLogin(ctx.ip);
+  const token = d.criarSessao(u);
+  sendJson(ctx.res, 200, { token, usuario: publicoUsuario(u) });
+});
+
+rota('POST', '/api/auth/logout', null, (ctx) => {
+  d.encerrarSessao(ctx.token);
+  sendJson(ctx.res, 200, { ok: true });
+});
+
+rota('GET', '/api/me', null, (ctx) => {
+  sendJson(ctx.res, 200, { usuario: publicoUsuario(ctx.usuario) });
+});
+
+rota('POST', '/api/auth/trocar-senha', null, (ctx) => {
+  const atual = String(ctx.body.senhaAtual || '');
+  const nova = String(ctx.body.novaSenha || '');
+  if (d.hashSenha(atual, ctx.usuario.sal) !== ctx.usuario.senhaHash) return erro(ctx.res, 400, 'Senha atual incorreta.');
+  if (nova.length < 6) return erro(ctx.res, 400, 'A nova senha precisa ter ao menos 6 caracteres.');
+  ctx.usuario.sal = d.novoSal();
+  ctx.usuario.senhaHash = d.hashSenha(nova, ctx.usuario.sal);
+  d.flush();
+  sendJson(ctx.res, 200, { ok: true });
+});
+
+// ---- usuários (admin) ------------------------------------------------------
+rota('GET', '/api/usuarios', ['admin'], (ctx) => {
+  sendJson(ctx.res, 200, { usuarios: d.db.usuarios.map(publicoUsuario) });
+});
+
+rota('POST', '/api/usuarios', ['admin'], (ctx) => {
+  const nome = txt(ctx.body.nome, 80);
+  const login = txt(ctx.body.login, 60).toLowerCase();
+  const senha = String(ctx.body.senha || '');
+  const papel = String(ctx.body.papel || '');
+  if (!nome || !login) return erro(ctx.res, 400, 'Informe nome e login.');
+  if (!/^[a-z0-9._-]+$/.test(login)) return erro(ctx.res, 400, 'Login: use apenas letras, números, ponto, hífen.');
+  if (senha.length < 6) return erro(ctx.res, 400, 'A senha precisa ter ao menos 6 caracteres.');
+  if (!['solicitante', 'financeiro', 'admin'].includes(papel)) return erro(ctx.res, 400, 'Papel inválido.');
+  if (d.db.usuarios.some((u) => u.login === login)) return erro(ctx.res, 409, 'Já existe um usuário com esse login.');
+  const u = d.criarUsuarioObj(nome, login, senha, papel);
+  d.db.usuarios.push(u);
+  d.flush();
+  notifyChange('usuarios');
+  sendJson(ctx.res, 200, { usuario: publicoUsuario(u) });
+});
+
+rota('PUT', '/api/usuarios/:id', ['admin'], (ctx) => {
+  const u = d.db.usuarios.find((x) => x.id === ctx.params.id);
+  if (!u) return erro(ctx.res, 404, 'Usuário não encontrado.');
+  if (ctx.body.nome !== undefined) u.nome = txt(ctx.body.nome, 80) || u.nome;
+  if (ctx.body.papel !== undefined) {
+    if (!['solicitante', 'financeiro', 'admin'].includes(ctx.body.papel)) return erro(ctx.res, 400, 'Papel inválido.');
+    if (u.papel === 'admin' && ctx.body.papel !== 'admin' &&
+        d.db.usuarios.filter((x) => x.papel === 'admin').length <= 1) {
+      return erro(ctx.res, 400, 'Não é possível rebaixar o único admin.');
+    }
+    u.papel = ctx.body.papel;
+  }
+  if (ctx.body.novaSenha) {
+    if (String(ctx.body.novaSenha).length < 6) return erro(ctx.res, 400, 'A senha precisa ter ao menos 6 caracteres.');
+    u.sal = d.novoSal();
+    u.senhaHash = d.hashSenha(String(ctx.body.novaSenha), u.sal);
+  }
+  d.flush();
+  notifyChange('usuarios');
+  sendJson(ctx.res, 200, { usuario: publicoUsuario(u) });
+});
+
+rota('DELETE', '/api/usuarios/:id', ['admin'], (ctx) => {
+  const u = d.db.usuarios.find((x) => x.id === ctx.params.id);
+  if (!u) return erro(ctx.res, 404, 'Usuário não encontrado.');
+  if (u.id === ctx.usuario.id) return erro(ctx.res, 400, 'Você não pode remover a si mesmo.');
+  if (u.papel === 'admin' && d.db.usuarios.filter((x) => x.papel === 'admin').length <= 1) {
+    return erro(ctx.res, 400, 'Não é possível remover o único admin.');
+  }
+  d.db.usuarios = d.db.usuarios.filter((x) => x.id !== u.id);
+  d.db.sessoes = d.db.sessoes.filter((s) => s.usuarioId !== u.id);
+  d.flush();
+  notifyChange('usuarios');
+  sendJson(ctx.res, 200, { ok: true });
+});
+
+// ---- chamados ---------------------------------------------------------------
+function podeVerChamado(usuario, chamado) {
+  if (usuario.papel === 'admin' || usuario.papel === 'financeiro') return true;
+  return chamado.solicitante.id === usuario.id;
+}
+
+rota('GET', '/api/chamados', null, (ctx) => {
+  let lista = d.db.chamados;
+  if (ctx.usuario.papel === 'solicitante') {
+    lista = lista.filter((c) => c.solicitante.id === ctx.usuario.id);
+  }
+  // Mais recentes primeiro.
+  lista = lista.slice().sort((a, b) => (a.criadoEm < b.criadoEm ? 1 : -1));
+  sendJson(ctx.res, 200, { chamados: lista });
+});
+
+rota('POST', '/api/chamados', null, (ctx) => {
+  const v = ctx.body.veiculo || {};
+  const c = ctx.body.condutor || {};
+  const veiculo = {
+    placa: txt(v.placa, 12).toUpperCase(),
+    modelo: txt(v.modelo, 80),
+    ano: txt(v.ano, 8),
+    km: txt(v.km, 12),
+  };
+  const condutor = {
+    nome: txt(c.nome, 80),
+    documento: txt(c.documento, 20),
+    cnh: txt(c.cnh, 20),
+    telefone: txt(c.telefone, 20),
+  };
+  const valorTotalCent = centavos(ctx.body.valorTotalCent);
+  if (!veiculo.placa) return erro(ctx.res, 400, 'Informe a placa do veículo.');
+  if (!veiculo.modelo) return erro(ctx.res, 400, 'Informe o modelo do veículo.');
+  if (!condutor.nome) return erro(ctx.res, 400, 'Informe o nome do condutor.');
+  if (!valorTotalCent) return erro(ctx.res, 400, 'Informe um valor total válido (maior que zero).');
+
+  const adiantamentoCent = Math.round(valorTotalCent * 0.7);
+  const saldoCent = valorTotalCent - adiantamentoCent;
+  const chamado = {
+    id: d.novoIdChamado(),
+    criadoEm: d.agora(),
+    solicitante: { id: ctx.usuario.id, nome: ctx.usuario.nome },
+    veiculo,
+    condutor,
+    observacoes: txt(ctx.body.observacoes, 1000),
+    valorTotalCent,
+    adiantamentoCent,
+    saldoCent,
+    status: 'aberto', // aberto → adiantamento_pago → viagem_encerrada → finalizado | cancelado
+    adiantamentoPagoEm: null,
+    encerramentoConfirmadoEm: null,
+    lembreteSaldoEm: null,
+    saldoPagoEm: null,
+    anexos: { entrada: [], saida: [] },
+    historico: [],
+  };
+  historico(chamado, ctx.usuario, 'Chamado aberto.',
+    'Valor total ' + reaisFmt(valorTotalCent) + ' · Adiantamento (70%) ' + reaisFmt(adiantamentoCent) +
+    ' · Saldo ' + reaisFmt(saldoCent));
+  d.db.chamados.push(chamado);
+  criarNotificacao(
+    'novo_chamado', chamado,
+    'Novo chamado ' + chamado.id + ' — ' + ctx.usuario.nome,
+    'Solicitante: ' + ctx.usuario.nome +
+      '. Veículo: ' + veiculo.placa + ' (' + veiculo.modelo + ')' +
+      '. Condutor: ' + condutor.nome +
+      '. Valor total: ' + reaisFmt(valorTotalCent) +
+      '. Adiantamento (70%): ' + reaisFmt(adiantamentoCent) +
+      '. Saldo: ' + reaisFmt(saldoCent) + '.'
+  );
+  d.flush();
+  notifyChange('chamados');
+  sendJson(ctx.res, 200, { chamado });
+});
+
+rota('GET', '/api/chamados/:id', null, (ctx) => {
+  const chamado = acharChamado(ctx.params.id);
+  if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
+  if (!podeVerChamado(ctx.usuario, chamado)) return erro(ctx.res, 403, 'Sem permissão para ver este chamado.');
+  sendJson(ctx.res, 200, { chamado });
+});
+
+rota('POST', '/api/chamados/:id/adiantamento-pago', ['financeiro', 'admin'], (ctx) => {
+  const chamado = acharChamado(ctx.params.id);
+  if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
+  if (chamado.status === 'cancelado') return erro(ctx.res, 400, 'Chamado cancelado.');
+  if (chamado.adiantamentoPagoEm) return erro(ctx.res, 400, 'Adiantamento já registrado como pago.');
+  chamado.adiantamentoPagoEm = d.agora();
+  if (chamado.status === 'aberto') chamado.status = 'adiantamento_pago';
+  historico(chamado, ctx.usuario, 'Adiantamento pago (' + reaisFmt(chamado.adiantamentoCent) + ').');
+  reconhecerNotificacoesDoChamado(chamado.id, ctx.usuario, ['novo_chamado']);
+  d.flush();
+  notifyChange('chamados');
+  sendJson(ctx.res, 200, { chamado });
+});
+
+rota('POST', '/api/chamados/:id/encerrar-viagem', null, (ctx) => {
+  const chamado = acharChamado(ctx.params.id);
+  if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
+  if (!podeVerChamado(ctx.usuario, chamado)) return erro(ctx.res, 403, 'Sem permissão.');
+  if (chamado.status === 'cancelado') return erro(ctx.res, 400, 'Chamado cancelado.');
+  if (chamado.encerramentoConfirmadoEm) return erro(ctx.res, 400, 'Encerramento já confirmado.');
+  chamado.encerramentoConfirmadoEm = d.agora();
+  if (chamado.status !== 'finalizado') chamado.status = 'viagem_encerrada';
+  const dataLembrete = new Date(Date.now() + LEMBRETE_MS);
+  historico(chamado, ctx.usuario, 'Encerramento da viagem confirmado.',
+    'Lembrete do saldo será gerado em ' + dataLembrete.toLocaleDateString('pt-BR') + '.');
+  criarNotificacao(
+    'viagem_encerrada', chamado,
+    'Viagem encerrada — chamado ' + chamado.id,
+    ctx.usuario.nome + ' confirmou o encerramento da viagem. Saldo de ' + reaisFmt(chamado.saldoCent) +
+      ' a pagar. Lembrete automático em ' + dataLembrete.toLocaleDateString('pt-BR') + ' (5 dias).'
+  );
+  d.flush();
+  notifyChange('chamados');
+  sendJson(ctx.res, 200, { chamado });
+});
+
+rota('POST', '/api/chamados/:id/saldo-pago', ['financeiro', 'admin'], (ctx) => {
+  const chamado = acharChamado(ctx.params.id);
+  if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
+  if (chamado.status === 'cancelado') return erro(ctx.res, 400, 'Chamado cancelado.');
+  if (chamado.saldoPagoEm) return erro(ctx.res, 400, 'Saldo já registrado como pago.');
+  if (!chamado.encerramentoConfirmadoEm) return erro(ctx.res, 400, 'Confirme o encerramento da viagem antes de pagar o saldo.');
+  chamado.saldoPagoEm = d.agora();
+  chamado.status = 'finalizado';
+  historico(chamado, ctx.usuario, 'Saldo pago (' + reaisFmt(chamado.saldoCent) + '). Chamado finalizado.');
+  reconhecerNotificacoesDoChamado(chamado.id, ctx.usuario, null); // encerra todos os avisos deste chamado
+  d.flush();
+  notifyChange('chamados');
+  sendJson(ctx.res, 200, { chamado });
+});
+
+rota('POST', '/api/chamados/:id/cancelar', ['admin'], (ctx) => {
+  const chamado = acharChamado(ctx.params.id);
+  if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
+  if (chamado.status === 'finalizado') return erro(ctx.res, 400, 'Chamado já finalizado.');
+  chamado.status = 'cancelado';
+  historico(chamado, ctx.usuario, 'Chamado cancelado.', txt(ctx.body.motivo, 300) || null);
+  reconhecerNotificacoesDoChamado(chamado.id, ctx.usuario, null);
+  d.flush();
+  notifyChange('chamados');
+  sendJson(ctx.res, 200, { chamado });
+});
+
+// ---- anexos (fotos de entrada e saída da viagem) ----------------------------
+rota('POST', '/api/chamados/:id/anexos', null, (ctx) => {
+  const chamado = acharChamado(ctx.params.id);
+  if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
+  if (!podeVerChamado(ctx.usuario, chamado)) return erro(ctx.res, 403, 'Sem permissão.');
+  if (chamado.status === 'cancelado') return erro(ctx.res, 400, 'Chamado cancelado.');
+  const tipo = ctx.body.tipo === 'saida' ? 'saida' : ctx.body.tipo === 'entrada' ? 'entrada' : null;
+  if (!tipo) return erro(ctx.res, 400, 'Tipo do anexo deve ser "entrada" ou "saida".');
+  const mime = String(ctx.body.mime || '');
+  const ext = IMAGENS[mime];
+  if (!ext) return erro(ctx.res, 400, 'Envie uma imagem PNG, JPG, WEBP ou GIF.');
+  let b64 = String(ctx.body.dataBase64 || '');
+  const m = b64.match(/^data:[^;]+;base64,(.*)$/s);
+  if (m) b64 = m[1];
+  let buf;
+  try { buf = Buffer.from(b64, 'base64'); } catch (e) { return erro(ctx.res, 400, 'Imagem inválida.'); }
+  if (!buf || buf.length < 100) return erro(ctx.res, 400, 'Imagem vazia ou inválida.');
+  if (buf.length > ANEXO_MAX) return erro(ctx.res, 400, 'Imagem grande demais (máx. 12 MB).');
+
+  const anexoId = d.novoIdAnexo();
+  const dir = path.join(d.ANEXOS_DIR, chamado.id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, anexoId + ext), buf);
+  const anexo = {
+    id: anexoId,
+    nome: txt(ctx.body.nome, 120) || (tipo + ext),
+    mime,
+    ext,
+    tamanho: buf.length,
+    em: d.agora(),
+    por: ctx.usuario.nome,
+  };
+  chamado.anexos[tipo].push(anexo);
+  historico(chamado, ctx.usuario, 'Foto de ' + (tipo === 'entrada' ? 'entrada' : 'saída') + ' anexada.', anexo.nome);
+  d.flush();
+  notifyChange('chamados');
+  sendJson(ctx.res, 200, { anexo, chamado });
+});
+
+rota('GET', '/api/chamados/:id/anexos/:anexoId', null, (ctx) => {
+  const chamado = acharChamado(ctx.params.id);
+  if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
+  if (!podeVerChamado(ctx.usuario, chamado)) return erro(ctx.res, 403, 'Sem permissão.');
+  const anexo = chamado.anexos.entrada.concat(chamado.anexos.saida).find((a) => a.id === ctx.params.anexoId);
+  if (!anexo) return erro(ctx.res, 404, 'Anexo não encontrado.');
+  const file = path.join(d.ANEXOS_DIR, chamado.id, anexo.id + anexo.ext);
+  fs.readFile(file, (err, data) => {
+    if (err) return erro(ctx.res, 404, 'Arquivo do anexo não encontrado no servidor.');
+    send(ctx.res, 200, data, { 'Content-Type': anexo.mime, 'Cache-Control': 'private, max-age=3600' });
+  });
+});
+
+rota('DELETE', '/api/chamados/:id/anexos/:anexoId', null, (ctx) => {
+  const chamado = acharChamado(ctx.params.id);
+  if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
+  if (!podeVerChamado(ctx.usuario, chamado)) return erro(ctx.res, 403, 'Sem permissão.');
+  if (chamado.status === 'finalizado') return erro(ctx.res, 400, 'Chamado finalizado: anexos não podem mais ser removidos.');
+  for (const tipo of ['entrada', 'saida']) {
+    const i = chamado.anexos[tipo].findIndex((a) => a.id === ctx.params.anexoId);
+    if (i >= 0) {
+      const anexo = chamado.anexos[tipo][i];
+      chamado.anexos[tipo].splice(i, 1);
+      try { fs.unlinkSync(path.join(d.ANEXOS_DIR, chamado.id, anexo.id + anexo.ext)); } catch (e) { /* ignore */ }
+      historico(chamado, ctx.usuario, 'Foto de ' + (tipo === 'entrada' ? 'entrada' : 'saída') + ' removida.', anexo.nome);
+      d.flush();
+      notifyChange('chamados');
+      return sendJson(ctx.res, 200, { ok: true, chamado });
+    }
+  }
+  erro(ctx.res, 404, 'Anexo não encontrado.');
+});
+
+// ---- notificações ------------------------------------------------------------
+rota('GET', '/api/notificacoes', ['financeiro', 'admin'], (ctx) => {
+  const lista = d.db.notificacoes.slice().sort((a, b) => (a.em < b.em ? 1 : -1)).slice(0, 100);
+  sendJson(ctx.res, 200, { notificacoes: lista });
+});
+
+rota('GET', '/api/notificacoes/pendentes', ['financeiro', 'admin'], (ctx) => {
+  verificarLembretes(); // aproveita a consulta do notificador para checar os 5 dias
+  const lista = d.db.notificacoes.filter((n) => !n.reconhecidaPor);
+  sendJson(ctx.res, 200, { notificacoes: lista });
+});
+
+rota('POST', '/api/notificacoes/:id/reconhecer', ['financeiro', 'admin'], (ctx) => {
+  const n = d.db.notificacoes.find((x) => x.id === ctx.params.id);
+  if (!n) return erro(ctx.res, 404, 'Notificação não encontrada.');
+  if (!n.reconhecidaPor) {
+    n.reconhecidaPor = { id: ctx.usuario.id, nome: ctx.usuario.nome, em: d.agora() };
+    d.flush();
+    notifyChange('notificacoes');
+  }
+  sendJson(ctx.res, 200, { notificacao: n });
+});
+
+// ---- backup ------------------------------------------------------------------
+rota('GET', '/api/export', ['admin'], (ctx) => {
+  sendJson(ctx.res, 200, d.db);
+});
+
+// ---------------------------------------------------------------------------
+// Despacho HTTP.
+// ---------------------------------------------------------------------------
+function handleApi(req, res) {
+  const chunks = [];
+  let size = 0;
+  let tooBig = false;
+  req.on('data', (c) => {
+    if (tooBig) return;
+    size += c.length;
+    if (size > BODY_LIMIT) {
+      tooBig = true;
+      erro(res, 413, 'Arquivo grande demais para o servidor.');
+      req.destroy();
+      return;
+    }
+    chunks.push(c);
+  });
+  req.on('end', () => {
+    if (res.writableEnded) return;
+    let body = {};
+    if (chunks.length) {
+      try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); }
+      catch (e) { return erro(res, 400, 'JSON inválido no corpo da requisição.'); }
+    }
+    const u = new URL(req.url, 'http://x');
+    const urlPath = u.pathname;
+    const query = u.searchParams;
+    const ip = (req.socket && req.socket.remoteAddress) || '?';
+    const token = req.headers['x-token'] || query.get('token') || '';
+
+    for (const r of rotas) {
+      if (r.metodo !== req.method) continue;
+      const m = r.re.exec(urlPath);
+      if (!m) continue;
+      const params = {};
+      r.keys.forEach((k, i) => { try { params[k] = decodeURIComponent(m[i + 1]); } catch (e) { params[k] = m[i + 1]; } });
+
+      const anon = Array.isArray(r.papeis) && r.papeis.includes('anon');
+      let usuario = null;
+      if (!anon) {
+        usuario = d.usuarioPorToken(token);
+        if (!usuario) return erro(res, 401, 'Sessão inválida ou expirada. Entre novamente.');
+        if (Array.isArray(r.papeis) && r.papeis.length && !r.papeis.includes(usuario.papel)) {
+          return erro(res, 403, 'Seu perfil não tem permissão para esta ação.');
+        }
+      }
+      try {
+        return r.handler({ req, res, usuario, body, params, query, ip, token });
+      } catch (e) {
+        console.error('[Chamados] erro na rota ' + req.method + ' ' + urlPath + ':', e);
+        return erro(res, 500, 'Erro interno do servidor.');
+      }
+    }
+    erro(res, 404, 'Rota não encontrada.');
+  });
+  req.on('error', () => { if (!res.writableEnded) send(res, 400, 'Erro na requisição'); });
+}
+
+function serveStatic(req, res) {
+  let urlPath;
+  try { urlPath = decodeURIComponent(req.url.split('?')[0]); }
+  catch (e) { return send(res, 400, 'Bad request'); }
+  if (urlPath === '/' || urlPath === '') urlPath = '/index.html';
+
+  const filePath = path.normalize(path.join(ROOT, urlPath));
+  if (filePath !== ROOT && !filePath.startsWith(ROOT + path.sep)) {
+    return send(res, 403, 'Forbidden');
+  }
+  // Não expor o código do servidor pela web.
+  const blocked = [path.join(ROOT, 'server')];
+  if (blocked.some((b) => filePath === b || filePath.startsWith(b + path.sep))) {
+    return send(res, 403, 'Forbidden');
+  }
+  fs.readFile(filePath, (err, data) => {
+    if (err) return send(res, 404, 'Não encontrado');
+    const ext = path.extname(filePath).toLowerCase();
+    send(res, 200, data, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+  });
+}
+
+const server = http.createServer((req, res) => {
+  const u = new URL(req.url, 'http://x');
+  if (u.pathname === '/api/events' && req.method === 'GET') {
+    return handleSSE(req, res, u.searchParams);
+  }
+  if (u.pathname === '/api' || u.pathname.startsWith('/api/')) {
+    return handleApi(req, res);
+  }
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    return send(res, 405, 'Método não permitido');
+  }
+  serveStatic(req, res);
+});
+
+server.listen(PORT, HOST, () => {
+  console.log(`[Chamados Financeiros] servidor no ar em http://${HOST}:${PORT}`);
+  console.log(`[Chamados Financeiros] dados em: ${d.DATA_FILE}`);
+  console.log(`[Chamados Financeiros] anexos em: ${d.ANEXOS_DIR}`);
+  console.log(`[Chamados Financeiros] lembrete do saldo: ${Math.round(LEMBRETE_MS / 3600000)}h após o encerramento`);
+});
+
+// Verificador do lembrete de 5 dias (roda a cada 5 minutos).
+const CHECK_MS = Math.min(5 * 60 * 1000, Math.max(5000, Math.floor(LEMBRETE_MS / 4)));
+setInterval(() => { try { verificarLembretes(); } catch (e) { console.error('[Chamados] lembretes:', e); } }, CHECK_MS).unref();
+verificarLembretes();
+
+// Snapshot automático periódico + limpeza de sessões vencidas.
+setInterval(() => {
+  try { d.snapshot('auto'); } catch (e) { /* ignore */ }
+  try { d.limparSessoes(); } catch (e) { /* ignore */ }
+}, 6 * 60 * 60 * 1000).unref();

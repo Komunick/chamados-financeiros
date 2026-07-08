@@ -1,0 +1,255 @@
+/* Chamados Financeiros — estilos */
+:root {
+  --fundo: #f2f4f8;
+  --cartao: #ffffff;
+  --tinta: #1c2433;
+  --mudo: #64748b;
+  --borda: #e2e8f0;
+  --primario: #1d4ed8;
+  --primario-escuro: #1e40af;
+  --verde: #15803d;
+  --verde-fundo: #dcfce7;
+  --amarelo: #a16207;
+  --amarelo-fundo: #fef9c3;
+  --laranja: #c2410c;
+  --laranja-fundo: #ffedd5;
+  --vermelho: #b91c1c;
+  --vermelho-fundo: #fee2e2;
+  --azul-fundo: #dbeafe;
+  --sombra: 0 1px 3px rgba(15, 23, 42, .08), 0 4px 16px rgba(15, 23, 42, .06);
+  --raio: 12px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--fundo);
+  color: var(--tinta);
+  font-size: 15px;
+}
+.oculto { display: none !important; }
+.mudo { color: var(--mudo); }
+.erro { color: var(--vermelho); }
+
+/* ---------- login ---------- */
+.tela-login {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 60%, #3b82f6 100%);
+  padding: 16px;
+}
+.login-cartao {
+  width: 380px;
+  max-width: 100%;
+  text-align: center;
+  padding: 32px 28px;
+}
+.login-logo { font-size: 44px; }
+.login-cartao h1 { margin: 8px 0 4px; font-size: 22px; }
+.login-cartao p { margin: 0 0 18px; }
+.login-cartao label { display: block; text-align: left; margin-bottom: 12px; font-weight: 600; font-size: 13px; }
+.login-cartao input { margin-top: 4px; }
+
+/* ---------- topo ---------- */
+.topo {
+  background: var(--cartao);
+  border-bottom: 1px solid var(--borda);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 10px 20px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.topo-titulo { display: flex; align-items: center; gap: 8px; font-size: 16px; white-space: nowrap; }
+.topo-logo { font-size: 22px; }
+.topo-nav { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
+.topo-nav a {
+  text-decoration: none;
+  color: var(--mudo);
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+}
+.topo-nav a:hover { background: var(--fundo); color: var(--tinta); }
+.topo-nav a.ativo { background: var(--azul-fundo); color: var(--primario); }
+.topo-usuario { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
+.sino { cursor: pointer; position: relative; font-size: 20px; }
+.sino-badge {
+  position: absolute; top: -6px; right: -10px;
+  background: var(--vermelho); color: #fff;
+  font-size: 11px; font-weight: 700;
+  border-radius: 999px; padding: 1px 6px;
+}
+
+/* ---------- estrutura ---------- */
+.conteudo { max-width: 1080px; margin: 0 auto; padding: 24px 20px 60px; }
+.cartao {
+  background: var(--cartao);
+  border: 1px solid var(--borda);
+  border-radius: var(--raio);
+  box-shadow: var(--sombra);
+  padding: 20px;
+}
+.linha-topo { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.linha-topo h2 { margin: 0; font-size: 20px; }
+
+/* ---------- formulários ---------- */
+input, select, textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+  color: var(--tinta);
+}
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--primario);
+  outline-offset: -1px;
+  border-color: var(--primario);
+}
+label { font-size: 13px; font-weight: 600; }
+.form-grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.form-grade label { display: block; }
+.form-grade input, .form-grade select { margin-top: 4px; }
+.form-secao { margin: 0 0 10px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.form-secao:not(:first-child) { margin-top: 22px; }
+fieldset { border: none; margin: 0; padding: 0; }
+
+/* ---------- botões ---------- */
+.btn {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--fundo);
+  color: var(--tinta);
+}
+.btn:hover { filter: brightness(.96); }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn-primario { background: var(--primario); color: #fff; }
+.btn-primario:hover { background: var(--primario-escuro); filter: none; }
+.btn-verde { background: var(--verde); color: #fff; }
+.btn-suave { background: var(--fundo); border-color: var(--borda); }
+.btn-perigo { background: var(--vermelho-fundo); color: var(--vermelho); }
+.btn-largo { width: 100%; }
+.btn-mini { padding: 4px 10px; font-size: 13px; }
+
+/* ---------- lista de chamados ---------- */
+.filtros { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.filtros input, .filtros select { width: auto; min-width: 180px; }
+.tabela-envolta { overflow-x: auto; }
+table.lista { width: 100%; border-collapse: collapse; }
+table.lista th, table.lista td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--borda); white-space: nowrap; }
+table.lista th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--mudo); }
+table.lista tbody tr { cursor: pointer; }
+table.lista tbody tr:hover { background: #f8fafc; }
+.vazio { text-align: center; padding: 40px 10px; color: var(--mudo); }
+
+/* ---------- chips de status ---------- */
+.chip { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.chip-aberto { background: var(--azul-fundo); color: var(--primario); }
+.chip-adiantamento_pago { background: var(--amarelo-fundo); color: var(--amarelo); }
+.chip-viagem_encerrada { background: var(--laranja-fundo); color: var(--laranja); }
+.chip-finalizado { background: var(--verde-fundo); color: var(--verde); }
+.chip-cancelado { background: var(--vermelho-fundo); color: var(--vermelho); }
+.chip-pendente { background: var(--amarelo-fundo); color: var(--amarelo); }
+.chip-pago { background: var(--verde-fundo); color: var(--verde); }
+
+/* ---------- abas ---------- */
+.abas { display: flex; gap: 4px; border-bottom: 2px solid var(--borda); margin: 18px 0 20px; flex-wrap: wrap; }
+.aba {
+  border: none; background: none; font: inherit; font-weight: 600;
+  padding: 10px 16px; cursor: pointer; color: var(--mudo);
+  border-bottom: 2px solid transparent; margin-bottom: -2px;
+}
+.aba:hover { color: var(--tinta); }
+.aba.ativa { color: var(--primario); border-bottom-color: var(--primario); }
+
+/* ---------- financeiro (adiantamento/saldo) ---------- */
+.valores { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.valor-cartao { border: 1px solid var(--borda); border-radius: var(--raio); padding: 16px; }
+.valor-cartao .rotulo { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--mudo); font-weight: 700; }
+.valor-cartao .valor { font-size: 26px; font-weight: 800; margin: 6px 0; }
+.valor-cartao.destaque { background: var(--azul-fundo); border-color: #bfdbfe; }
+.valor-cartao .obs { font-size: 13px; color: var(--mudo); }
+.acoes-status { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+.aviso-lembrete {
+  margin-top: 16px; padding: 12px 14px; border-radius: 10px;
+  background: var(--amarelo-fundo); color: var(--amarelo); font-size: 14px;
+}
+
+/* ---------- anexos ---------- */
+.anexos-grupos { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 760px) { .anexos-grupos { grid-template-columns: 1fr; } }
+.anexo-grupo { border: 1px dashed var(--borda); border-radius: var(--raio); padding: 14px; }
+.anexo-grupo h4 { margin: 0 0 10px; }
+.anexo-miniaturas { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.anexo-mini { position: relative; }
+.anexo-mini img {
+  width: 110px; height: 110px; object-fit: cover;
+  border-radius: 10px; border: 1px solid var(--borda); cursor: pointer; display: block;
+}
+.anexo-mini .remover {
+  position: absolute; top: -6px; right: -6px;
+  background: var(--vermelho); color: #fff; border: none; border-radius: 999px;
+  width: 22px; height: 22px; cursor: pointer; font-size: 12px; line-height: 1;
+}
+.anexo-mini .legenda { font-size: 11px; color: var(--mudo); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- detalhe: dados ---------- */
+.dados-grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+.dados-bloco h4 { margin: 0 0 8px; }
+.dados-bloco dl { margin: 0; }
+.dados-bloco dt { font-size: 12px; color: var(--mudo); text-transform: uppercase; letter-spacing: .04em; margin-top: 8px; }
+.dados-bloco dd { margin: 1px 0 0; font-weight: 600; }
+
+/* ---------- histórico ---------- */
+.hist { list-style: none; margin: 0; padding: 0; }
+.hist li { padding: 10px 0 10px 18px; border-left: 2px solid var(--borda); position: relative; }
+.hist li::before {
+  content: ''; position: absolute; left: -6px; top: 16px;
+  width: 10px; height: 10px; border-radius: 999px; background: var(--primario);
+}
+.hist .quando { font-size: 12px; color: var(--mudo); }
+
+/* ---------- notificações ---------- */
+.notif { border: 1px solid var(--borda); border-radius: var(--raio); padding: 14px 16px; margin-bottom: 12px; background: #fff; }
+.notif.pendente { border-left: 4px solid var(--vermelho); }
+.notif.ok { opacity: .75; }
+.notif .titulo { font-weight: 700; }
+.notif .quando { font-size: 12px; color: var(--mudo); }
+.notif .mensagem { margin: 6px 0 10px; }
+
+/* ---------- prévia 70/30 no formulário ---------- */
+.previa-valores {
+  margin-top: 14px; padding: 14px; border-radius: 10px;
+  background: var(--azul-fundo); display: flex; gap: 24px; flex-wrap: wrap;
+}
+.previa-valores div .rotulo { font-size: 12px; font-weight: 700; color: var(--primario); text-transform: uppercase; }
+.previa-valores div .num { font-size: 20px; font-weight: 800; }
+
+/* ---------- toasts ---------- */
+.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 10px; z-index: 100; max-width: 380px; }
+.toast {
+  background: #111827; color: #f9fafb; border-radius: 10px;
+  padding: 12px 16px; box-shadow: var(--sombra); font-size: 14px;
+  animation: subir .25s ease;
+}
+.toast.toast-erro { background: var(--vermelho); }
+.toast.toast-notif { background: var(--primario-escuro); cursor: pointer; }
+.toast .toast-titulo { font-weight: 700; margin-bottom: 2px; }
+@keyframes subir { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+@media (max-width: 640px) {
+  .topo { flex-wrap: wrap; }
+  .conteudo { padding: 16px 12px 60px; }
+  table.lista th, table.lista td { padding: 8px; }
+}

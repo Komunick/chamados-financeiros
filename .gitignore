@@ -1,0 +1,13 @@
+# Dados sensíveis e runtime
+chamados-data/
+notificador/config.json
+notificador/*.log
+*.log
+
+# Node (caso futuro use node_modules)
+node_modules/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

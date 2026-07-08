@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chamados Financeiros</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9A%9B%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <div id="app">
+    <!-- Tela de login -->
+    <div id="tela-login" class="tela-login oculto">
+      <form id="form-login" class="cartao login-cartao">
+        <div class="login-logo">🚛</div>
+        <h1>Chamados Financeiros</h1>
+        <p class="mudo">Adiantamento de viagens e pagamento de saldo</p>
+        <label>Login
+          <input type="text" id="login-usuario" autocomplete="username" required />
+        </label>
+        <label>Senha
+          <input type="password" id="login-senha" autocomplete="current-password" required />
+        </label>
+        <button type="submit" class="btn btn-primario btn-largo">Entrar</button>
+        <p id="login-erro" class="erro oculto"></p>
+      </form>
+    </div>
+
+    <!-- Aplicação -->
+    <div id="tela-app" class="oculto">
+      <header class="topo">
+        <div class="topo-titulo">
+          <span class="topo-logo">🚛</span>
+          <strong>Chamados Financeiros</strong>
+        </div>
+        <nav class="topo-nav" id="topo-nav"></nav>
+        <div class="topo-usuario">
+          <span id="sino" class="sino oculto" title="Notificações">🔔<span id="sino-badge" class="sino-badge oculto"></span></span>
+          <span id="usuario-nome" class="mudo"></span>
+          <button id="btn-sair" class="btn btn-suave">Sair</button>
+        </div>
+      </header>
+      <main id="conteudo" class="conteudo"></main>
+    </div>
+
+    <!-- Avisos flutuantes -->
+    <div id="toasts" class="toasts"></div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
