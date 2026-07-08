@@ -11,7 +11,7 @@
     chamados: [],
     notificacoes: [],
     abaDetalhe: 'financeiro',
-    abaRelatorio: 'dia',
+    abaRelatorio: 'viagens',
     filtroBuscaAud: '',
     filtroStatus: '',
     filtroBusca: '',
@@ -426,15 +426,19 @@
     // viagem (viagens agendadas para depois de hoje são as "futuras").
     const dataRef = (c) => (c.tipo === 'compra' || !c.dataViagem) ? isoLocal(new Date(c.criadoEm)) : c.dataViagem;
     const ehFuturo = (c) => dataRef(c) > hojeIso;
-    const soma = (l) => l.filter((c) => c.status !== 'cancelado').reduce((s, c) => s + c.valorTotalCent, 0);
+    const validos = (l) => l.filter((c) => c.status !== 'cancelado');
+    const soma = (l) => validos(l).reduce((s, c) => s + c.valorTotalCent, 0);
+    // Quanto já foi pago e quanto ainda resta de cada chamado.
+    const pagoCent = (c) => c.tipo === 'compra'
+      ? (c.compraPagaEm ? c.valorTotalCent : 0)
+      : (c.adiantamentoPagoEm ? c.adiantamentoCent : 0) + (c.saldoPagoEm ? c.saldoCent : 0);
+    const restanteCent = (c) => c.valorTotalCent - pagoCent(c);
 
     const viagens = itens.filter((c) => c.tipo !== 'compra');
     const compras = itens.filter((c) => c.tipo === 'compra');
     const doDia = itens.filter((c) => dataRef(c) === hojeIso);
     const futuras = itens.filter(ehFuturo);
     const futuras7 = futuras.filter((c) => dataRef(c) <= lim7Iso);
-    const somaFuturo7 = soma(futuras7);
-    const somaFuturoTotal = soma(futuras);
 
     const cardResumo = (rotulo, valor, obs, destaque) =>
       el('div', { class: 'valor-cartao' + (destaque ? ' destaque' : '') },
@@ -442,6 +446,8 @@
         el('div', { class: 'valor' }, valor),
         obs ? el('div', { class: 'obs' }, obs) : null);
 
+    const somaFuturoTotal = soma(futuras);
+    const somaFuturo7 = soma(futuras7);
     const resumo = el('div', { class: 'valores' },
       cardResumo('Valor do dia (' + fmtDataViagem(hojeIso) + ')', fmtMoeda(soma(doDia)),
         'Compras de hoje + viagens com data de hoje.', true),
@@ -464,10 +470,12 @@
       return;
     }
 
-    // ---- sub-abas: combinada por dia · só viagens · só compras ----
+    // ---- sub-abas: viagens · compras · saldos · valor total ----
+    const ABAS_REL = [['viagens', 'Viagens'], ['compras', 'Compras'], ['saldos', 'Saldos'], ['total', 'Valor total']];
+    if (!ABAS_REL.some(([k]) => k === state.abaRelatorio)) state.abaRelatorio = 'viagens';
     const barra = el('div', { class: 'abas' });
     const corpo = el('div');
-    for (const [k, rot] of [['dia', 'Por dia (viagens + compras)'], ['viagens', 'Viagens'], ['compras', 'Compras']]) {
+    for (const [k, rot] of ABAS_REL) {
       barra.append(el('button', {
         class: 'aba' + (state.abaRelatorio === k ? ' ativa' : ''),
         onclick: () => { state.abaRelatorio = k; renderRota(); },
@@ -490,84 +498,126 @@
       t.append(tb);
       return el('div', { class: 'tabela-envolta' }, t);
     };
+    // Agrupa uma lista por dia de referência e desenha um bloco por dia,
+    // com o total do dia (mais recentes/futuros primeiro).
+    const porDia = (lista, cabecalhos, colunas) => {
+      const grupos = new Map();
+      for (const c of lista) {
+        const dia = dataRef(c);
+        if (!grupos.has(dia)) grupos.set(dia, []);
+        grupos.get(dia).push(c);
+      }
+      const frag = el('div');
+      for (const dia of [...grupos.keys()].sort().reverse()) {
+        const doGrupo = grupos.get(dia);
+        frag.append(el('div', { class: 'relatorio-dia' },
+          el('div', { class: 'relatorio-dia-topo' },
+            el('h3', null, fmtDataViagem(dia),
+              dia === hojeIso ? el('span', { class: 'mudo' }, ' — hoje') : '',
+              dia > hojeIso ? ' ' : '', dia > hojeIso ? chipFutura() : ''),
+            el('span', { class: 'relatorio-total' }, 'Total do dia: ' + fmtMoeda(soma(doGrupo)))),
+          montarTabela(cabecalhos, doGrupo.map((c) => linhaItem(c, colunas(c))))));
+      }
+      return frag;
+    };
 
     if (state.abaRelatorio === 'viagens') {
-      // ---- lista só de viagens (futuras primeiro, marcadas) ----
-      const lista = viagens.slice().sort((a, b) => (dataRef(a) < dataRef(b) ? 1 : -1));
+      // ---- só viagens, agrupadas pela data da viagem ----
       corpo.append(el('div', { class: 'relatorio-dia-topo' },
-        el('h3', null, 'Viagens'),
+        el('h3', null, 'Viagens por dia'),
         el('div', { class: 'relatorio-total' }, 'Total: ' + fmtMoeda(soma(viagens)))));
-      if (!lista.length) { corpo.append(el('div', { class: 'vazio' }, 'Nenhuma viagem registrada.')); return; }
-      corpo.append(montarTabela(
-        ['Nº', 'Data da viagem', 'Rota', 'Solicitante', 'Veículo', 'Condutor', 'Valor', 'Status'],
-        lista.map((c) => linhaItem(c, [
-          el('strong', null, c.id),
-          el('span', null, fmtDataViagem(c.dataViagem), ehFuturo(c) ? ' ' : '', ehFuturo(c) ? chipFutura() : ''),
-          c.rota || '—',
-          c.solicitante,
-          c.descricao,
-          c.condutor || '—',
-          fmtMoeda(c.valorTotalCent),
-          chipStatus(c.status),
-        ]))));
+      if (!viagens.length) { corpo.append(el('div', { class: 'vazio' }, 'Nenhuma viagem registrada.')); return; }
+      corpo.append(porDia(viagens,
+        ['Nº', 'Rota', 'Solicitante', 'Veículo', 'Condutor', 'Valor', 'Status'],
+        (c) => [el('strong', null, c.id), c.rota || '—', c.solicitante, c.descricao, c.condutor || '—', fmtMoeda(c.valorTotalCent), chipStatus(c.status)]));
       return;
     }
 
     if (state.abaRelatorio === 'compras') {
-      // ---- lista só de compras ----
+      // ---- só compras, agrupadas pelo dia da abertura ----
       corpo.append(el('div', { class: 'relatorio-dia-topo' },
-        el('h3', null, 'Compras'),
+        el('h3', null, 'Compras por dia'),
         el('div', { class: 'relatorio-total' }, 'Total: ' + fmtMoeda(soma(compras)))));
       if (!compras.length) { corpo.append(el('div', { class: 'vazio' }, 'Nenhuma compra registrada.')); return; }
-      corpo.append(montarTabela(
-        ['Nº', 'Aberto em', 'Solicitante', 'Descrição', 'Fornecedor', 'Valor', 'Status'],
-        compras.map((c) => linhaItem(c, [
-          el('strong', null, c.id),
-          fmtData(c.criadoEm),
-          c.solicitante,
-          c.descricao,
-          c.fornecedor || '—',
-          fmtMoeda(c.valorTotalCent),
-          chipStatus(c.status),
-        ]))));
+      corpo.append(porDia(compras,
+        ['Nº', 'Solicitante', 'Descrição', 'Fornecedor', 'Valor', 'Status'],
+        (c) => [el('strong', null, c.id), c.solicitante, c.descricao, c.fornecedor || '—', fmtMoeda(c.valorTotalCent), chipStatus(c.status)]));
       return;
     }
 
-    // ---- combinada: viagens + compras agrupadas por dia (futuros primeiro) ----
-    const grupos = new Map();
-    for (const c of itens) {
-      const dia = dataRef(c);
-      if (!grupos.has(dia)) grupos.set(dia, []);
-      grupos.get(dia).push(c);
-    }
-    const dias = [...grupos.keys()].sort().reverse();
-    for (const dia of dias) {
-      const doGrupo = grupos.get(dia);
-      const somaViagensDia = soma(doGrupo.filter((c) => c.tipo !== 'compra'));
-      const somaComprasDia = soma(doGrupo.filter((c) => c.tipo === 'compra'));
-      const titulo = el('h3', null, fmtDataViagem(dia),
-        dia === hojeIso ? el('span', { class: 'mudo' }, ' — hoje') : '',
-        dia > hojeIso ? ' ' : '', dia > hojeIso ? chipFutura() : '');
-      corpo.append(el('div', { class: 'relatorio-dia' },
-        el('div', { class: 'relatorio-dia-topo' },
-          titulo,
-          el('div', { class: 'relatorio-detalhe' },
-            (somaViagensDia && somaComprasDia)
-              ? el('span', { class: 'mudo' }, 'Viagens ' + fmtMoeda(somaViagensDia) + ' · Compras ' + fmtMoeda(somaComprasDia) + '  ')
-              : '',
-            el('span', { class: 'relatorio-total' }, 'Total do dia: ' + fmtMoeda(somaViagensDia + somaComprasDia)))),
-        montarTabela(
-          ['Nº', 'Tipo', 'Solicitante', 'Descrição', 'Rota / Fornecedor', 'Valor', 'Status'],
-          doGrupo.map((c) => linhaItem(c, [
+    if (state.abaRelatorio === 'saldos') {
+      // ---- saldos (30%) ainda não pagos: pendentes (viagem já ocorreu ou
+      // foi encerrada) e futuros (viagem ainda vai acontecer) ----
+      const emAberto = validos(viagens).filter((c) => !c.saldoPagoEm && c.saldoCent > 0);
+      const pendentes = emAberto.filter((c) => !ehFuturo(c) || c.encerramentoConfirmadoEm);
+      const futuros = emAberto.filter((c) => ehFuturo(c) && !c.encerramentoConfirmadoEm);
+      const somaSaldo = (l) => l.reduce((s, c) => s + c.saldoCent, 0);
+
+      const situacao = (c) => c.encerramentoConfirmadoEm
+        ? 'Viagem encerrada em ' + fmtData(c.encerramentoConfirmadoEm)
+        : (ehFuturo(c) ? 'Viagem agendada' : 'Aguardando encerramento');
+      const secao = (titulo, lista, vazioMsg) => {
+        const bloco = el('div', { class: 'relatorio-dia' },
+          el('div', { class: 'relatorio-dia-topo' },
+            el('h3', null, titulo),
+            el('span', { class: 'relatorio-total' }, 'Total: ' + fmtMoeda(somaSaldo(lista)))));
+        if (!lista.length) bloco.append(el('div', { class: 'vazio' }, vazioMsg));
+        else bloco.append(montarTabela(
+          ['Nº', 'Data da viagem', 'Rota', 'Solicitante', 'Veículo', 'Saldo (30%)', 'Situação'],
+          lista.map((c) => linhaItem(c, [
             el('strong', null, c.id),
-            chipTipo(c.tipo),
+            el('span', null, fmtDataViagem(c.dataViagem), ehFuturo(c) ? ' ' : '', ehFuturo(c) ? chipFutura() : ''),
+            c.rota || '—',
             c.solicitante,
             c.descricao,
-            (c.tipo === 'compra' ? c.fornecedor : c.rota) || '—',
-            fmtMoeda(c.valorTotalCent),
-            chipStatus(c.status),
-          ])))));
+            fmtMoeda(c.saldoCent),
+            situacao(c),
+          ]))));
+        return bloco;
+      };
+      corpo.append(
+        el('div', { class: 'valores' },
+          cardResumo('Saldos pendentes', fmtMoeda(somaSaldo(pendentes)), pendentes.length + ' viagem(ns) com saldo a pagar.', true),
+          cardResumo('Saldos futuros', fmtMoeda(somaSaldo(futuros)), futuros.length + ' viagem(ns) agendada(s).')),
+        secao('Saldos pendentes', pendentes.sort((a, b) => (dataRef(a) < dataRef(b) ? 1 : -1)), 'Nenhum saldo pendente.'),
+        secao('Saldos futuros', futuros.sort((a, b) => (dataRef(a) > dataRef(b) ? 1 : -1)), 'Nenhum saldo futuro.'));
+      return;
     }
+
+    // ---- valor total: soma tudo e subtrai o que já foi pago ----
+    const naoCancelados = validos(itens);
+    const bruto = soma(itens);
+    const totalPago = naoCancelados.reduce((s, c) => s + pagoCent(c), 0);
+    const restante = bruto - totalPago;
+    const emAberto = naoCancelados
+      .filter((c) => restanteCent(c) > 0)
+      .sort((a, b) => (dataRef(a) < dataRef(b) ? 1 : -1));
+
+    corpo.append(el('div', { class: 'valores' },
+      cardResumo('Valor total (todos os chamados)', fmtMoeda(bruto), 'Viagens + compras, sem os cancelados.'),
+      cardResumo('Já pago', fmtMoeda(totalPago), 'Adiantamentos, saldos e compras marcados como pagos.'),
+      cardResumo('Restante a pagar', fmtMoeda(restante), 'Diminui conforme os pagamentos são registrados.', true)));
+
+    corpo.append(el('div', { class: 'relatorio-dia' },
+      el('div', { class: 'relatorio-dia-topo' },
+        el('h3', null, 'Chamados com valor em aberto'),
+        el('span', { class: 'relatorio-total' }, 'Restante: ' + fmtMoeda(restante)))));
+    if (!emAberto.length) {
+      corpo.append(el('div', { class: 'vazio' }, 'Nenhum valor em aberto: tudo pago.'));
+      return;
+    }
+    corpo.append(montarTabela(
+      ['Nº', 'Tipo', 'Descrição', 'Solicitante', 'Valor total', 'Já pago', 'Restante', 'Status'],
+      emAberto.map((c) => linhaItem(c, [
+        el('strong', null, c.id),
+        chipTipo(c.tipo),
+        c.descricao,
+        c.solicitante,
+        fmtMoeda(c.valorTotalCent),
+        fmtMoeda(pagoCent(c)),
+        el('strong', null, fmtMoeda(restanteCent(c))),
+        chipStatus(c.status),
+      ]))));
   }
 
   // ------------------------------------------------------------------ novo chamado

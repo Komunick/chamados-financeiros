@@ -752,6 +752,12 @@ rota('GET', '/api/relatorios/movimento', ['financeiro', 'admin'], (ctx) => {
       rota: c.rota || '',
       dataViagem: c.dataViagem || null,
       valorTotalCent: c.valorTotalCent,
+      adiantamentoCent: c.adiantamentoCent || 0,
+      saldoCent: c.saldoCent || 0,
+      adiantamentoPagoEm: c.adiantamentoPagoEm || null,
+      saldoPagoEm: c.saldoPagoEm || null,
+      compraPagaEm: c.compraPagaEm || null,
+      encerramentoConfirmadoEm: c.encerramentoConfirmadoEm || null,
       status: c.status,
     }));
   sendJson(ctx.res, 200, { itens });
