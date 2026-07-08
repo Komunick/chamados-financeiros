@@ -646,7 +646,8 @@
       secCompra.classList.toggle('oculto', tipo !== 'compra');
       dicaValor.textContent = tipo === 'viagem'
         ? 'O sistema calcula automaticamente o adiantamento de 70% e o saldo de 30%.'
-        : 'Compra é paga em parcela única pelo financeiro (sem 70/30).';
+        : '';
+      dicaValor.classList.toggle('oculto', tipo !== 'viagem');
       atualizarPrevia();
     }
     btnViagem.addEventListener('click', () => definirTipo('viagem'));
