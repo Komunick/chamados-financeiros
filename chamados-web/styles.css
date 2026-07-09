@@ -374,6 +374,22 @@ table.lista td.aud-detalhe { white-space: normal; min-width: 240px; max-width: 4
 .toast .toast-titulo { font-family: var(--serifa); font-weight: 700; margin-bottom: 2px; }
 @keyframes subir { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
 
+/* ---------- sugestões do cadastro (autocompletar do novo chamado) ---------- */
+label.com-sugestoes { position: relative; }
+.sugestoes {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 40;
+  background: var(--cartao); border: 1px solid var(--borda); border-radius: var(--raio);
+  box-shadow: 0 6px 16px rgba(28, 43, 34, .14);
+  max-height: 240px; overflow-y: auto;
+}
+.sugestao {
+  display: block; width: 100%; text-align: left; padding: 8px 10px;
+  border: 0; background: none; font: inherit; font-weight: 400;
+  color: var(--tinta); cursor: pointer;
+}
+.sugestao:hover, .sugestao.ativo { background: var(--primario-fundo); }
+.sugestao .mudo { font-size: .85em; }
+
 @media (max-width: 640px) {
   .topo { flex-wrap: wrap; }
   .conteudo { padding: 16px 12px 60px; }

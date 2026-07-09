@@ -779,6 +779,27 @@ rota('GET', '/api/auditoria', ['financeiro', 'admin'], (ctx) => {
   sendJson(ctx.res, 200, { eventos });
 });
 
+// ---- cadastro de frota e motoristas -------------------------------------------
+// Gerado pela ferramenta importar-cadastro.py (planilha FROTA CERTADOC +
+// CSV da programação de motoristas). Alimenta o autocompletar do "Novo
+// chamado". Somente leitura; recarrega sozinho quando o arquivo muda.
+let cadastroCache = { mtime: 0, dados: null };
+function lerCadastro() {
+  const arq = path.join(d.DATA_DIR, 'cadastro.json');
+  try {
+    const st = fs.statSync(arq);
+    if (!cadastroCache.dados || st.mtimeMs !== cadastroCache.mtime) {
+      cadastroCache = { mtime: st.mtimeMs, dados: JSON.parse(fs.readFileSync(arq, 'utf8')) };
+    }
+    return cadastroCache.dados;
+  } catch (_) {
+    return { atualizadoEm: null, veiculos: [], motoristas: [] };
+  }
+}
+rota('GET', '/api/cadastro', null, (ctx) => {
+  sendJson(ctx.res, 200, lerCadastro());
+});
+
 // ---- backup ------------------------------------------------------------------
 rota('GET', '/api/export', ['admin'], (ctx) => {
   // Exporta a base completa (inclui hashes de senha e sessões): registra na

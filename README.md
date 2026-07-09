@@ -59,7 +59,8 @@ opencode\
 │   ├── start-server.bat        ← inicia o servidor (com loop de reinício)
 │   ├── run-hidden.vbs          ← inicia escondido (sem janela)
 │   ├── INSTALAR-AUTOINICIO.bat ← servidor sobe sozinho no boot (pede admin)
-│   └── LIBERAR-FIREWALL.bat    ← libera a porta 8090 só para o ZeroTier
+│   ├── LIBERAR-FIREWALL.bat    ← libera a porta 8090 só para o ZeroTier
+│   └── IMPORTAR-CADASTRO.bat   ← importa placas (frota) e motoristas p/ o autocompletar
 ├── chamados-data\       ← criada sozinha: chamados.json, anexos\, backups\
 ├── deploy-linux\        ← instalador p/ rodar numa VM Linux (systemd, porta 8090)
 └── notificador\         ← roda na máquina de QUEM RECEBE os chamados
@@ -84,6 +85,30 @@ opencode\
    **Usuários**:
    - **Solicitante** — quem abre os chamados;
    - **Financeiro** — quem recebe as notificações e registra os pagamentos.
+
+## Cadastro de placas e motoristas (autocompletar do Novo chamado)
+
+No formulário **Novo chamado**, os campos *Placa* e *Nome do condutor*
+sugerem os dados do cadastro oficial da empresa: ao escolher um motorista,
+**CPF e telefone preenchem sozinhos** (e o sistema avisa se a situação dele
+na programação não for APROVADO).
+
+O cadastro vem de dois arquivos e é importado pela ferramenta
+`chamados-web\importar-cadastro.py` (ou dois cliques em
+`IMPORTAR-CADASTRO.bat`):
+
+- **Placas** — planilha da frota exportada do CertaDoc
+  (`FROTA CERTADOC (2).xlsx`, aba "1º PASSO", colunas PLACA/RENAVAM);
+- **Motoristas** — CSV `PROGRAMAÇÃO BRAZIL TRANSPORTS - MOTORISTAS.csv`
+  (colunas MOTORISTA, CPF, TELEFONE, STATUS, FROTA / AGREGADO,
+  VENCIMENTO CNH).
+
+Os caminhos padrão apontam para a pasta Downloads; para usar outros:
+`uv run --with openpyxl python importar-cadastro.py --frota "..." --motoristas "..."`.
+O resultado fica em `chamados-data\cadastro.json`, servido pela API
+`GET /api/cadastro` (o servidor recarrega sozinho quando o arquivo muda —
+não precisa reiniciar). **Rode a importação de novo sempre que a frota ou a
+lista de motoristas mudar.**
 
 ## Como funciona o fluxo
 

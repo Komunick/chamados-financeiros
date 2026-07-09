@@ -675,10 +675,58 @@
       ]))));
   }
 
+  // -------------------------------------------- autocompletar (cadastro)
+  // Sugestões sob o campo, vindas do cadastro de frota/motoristas.
+  // buscar(texto) => [{valor, detalhe, item}]; aoEscolher(item) é opcional.
+  function autocompletar(input, buscar, aoEscolher) {
+    const rotulo = input.parentElement; // o <label> do campo
+    rotulo.classList.add('com-sugestoes');
+    const caixa = el('div', { class: 'sugestoes oculto' });
+    rotulo.append(caixa);
+    let opcoes = [];
+    let ativo = -1;
+    const fechar = () => { caixa.classList.add('oculto'); caixa.innerHTML = ''; opcoes = []; ativo = -1; };
+    const escolher = (op) => {
+      input.value = op.valor;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      fechar();
+      if (aoEscolher) aoEscolher(op.item);
+    };
+    const desenhar = () => {
+      caixa.innerHTML = '';
+      opcoes.forEach((op, i) => {
+        const b = el('button', { type: 'button', class: 'sugestao' + (i === ativo ? ' ativo' : '') },
+          op.valor, op.detalhe ? el('span', { class: 'mudo' }, '  ' + op.detalhe) : '');
+        b.addEventListener('mousedown', (e) => { e.preventDefault(); escolher(op); });
+        caixa.append(b);
+      });
+      caixa.classList.toggle('oculto', opcoes.length === 0);
+    };
+    const atualizar = () => { opcoes = buscar(input.value).slice(0, 8); ativo = -1; desenhar(); };
+    input.addEventListener('input', atualizar);
+    input.addEventListener('focus', atualizar);
+    input.addEventListener('blur', fechar);
+    input.addEventListener('keydown', (e) => {
+      if (caixa.classList.contains('oculto')) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); ativo = Math.min(ativo + 1, opcoes.length - 1); desenhar(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); ativo = Math.max(ativo - 1, 0); desenhar(); }
+      else if (e.key === 'Enter' && ativo >= 0) { e.preventDefault(); escolher(opcoes[ativo]); }
+      else if (e.key === 'Escape') fechar();
+    });
+  }
+
   // ------------------------------------------------------------------ novo chamado
-  function renderNovo(cont, tipoInicial) {
+  async function renderNovo(cont, tipoInicial) {
     cont.innerHTML = '';
     let tipo = tipoInicial === 'compra' ? 'compra' : 'viagem';
+
+    // Cadastro de frota/motoristas para o autocompletar (gerado pelo
+    // IMPORTAR-CADASTRO.bat; se não existir, os campos ficam livres).
+    if (!state.cadastro) {
+      try { state.cadastro = await api('GET', '/api/cadastro'); }
+      catch (_) { state.cadastro = { veiculos: [], motoristas: [] }; }
+    }
+    const cadastro = state.cadastro;
 
     // ---- valor + prévia 70/30 (só para viagem) ----
     const previa = el('div', { class: 'previa-valores oculto' });
@@ -701,8 +749,14 @@
     };
 
     // ---- campos de viagem ----
-    const placa = campo('Placa (BR ou Mercosul) *', { placeholder: 'ABC-1234 ou ABC1D23', maxlength: '8' });
+    const placa = campo('Placa (BR ou Mercosul) *', { placeholder: 'Escolha da frota ou digite', maxlength: '8' });
     aplicarMascara(placa.input, mascaraPlaca);
+    autocompletar(placa.input, (q) => {
+      const digitado = q.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      return cadastro.veiculos
+        .filter((v) => !digitado || v.placa.includes(digitado))
+        .map((v) => ({ valor: mascaraPlaca(v.placa), item: v }));
+    });
     const modelo = campo('Marca / modelo *', { placeholder: 'Ex.: VW Constellation 24.280' });
     const ano = campo('Ano', { placeholder: 'Ex.: 2020', inputmode: 'numeric', maxlength: '4' });
     aplicarMascara(ano.input, (v) => soDigitos(v).slice(0, 4));
@@ -710,9 +764,23 @@
     aplicarMascara(km.input, (v) => soDigitos(v).slice(0, 9));
     const dataViagem = campo('Data da viagem *', { type: 'date' });
     const rotaViagem = campo('Rota da viagem', { placeholder: 'Ex.: São Paulo → Curitiba (BR-116)' });
-    const cNome = campo('Nome do condutor *', {});
+    const cNome = campo('Nome do condutor *', { placeholder: 'Comece a digitar o nome…' });
     const cDoc = campo('CPF (só números)', { placeholder: '000.000.000-00', inputmode: 'numeric', maxlength: '14' });
     aplicarMascara(cDoc.input, mascaraCpf);
+    autocompletar(cNome.input, (q) => {
+      const trecho = q.trim().toUpperCase();
+      if (trecho.length < 2) return [];
+      return cadastro.motoristas
+        .filter((m) => m.nome.toUpperCase().includes(trecho))
+        .map((m) => ({ valor: m.nome, detalhe: m.cpf, item: m }));
+    }, (m) => {
+      // Escolheu um motorista do cadastro: CPF e telefone entram sozinhos.
+      if (m.cpf) cDoc.input.value = m.cpf;
+      if (m.telefone) cTel.input.value = m.telefone;
+      if (m.status && m.status !== 'APROVADO') {
+        toast('Situação do motorista na programação: ' + m.status + '. Confira antes de abrir o chamado.', 'erro');
+      }
+    });
     const cCnh = campo('CNH (só números)', { placeholder: '11 números da CNH', inputmode: 'numeric', maxlength: '11' });
     aplicarMascara(cCnh.input, (v) => soDigitos(v).slice(0, 11));
     const cTel = campo('Telefone', { placeholder: '(00) 90000-0000', inputmode: 'numeric', maxlength: '15' });
