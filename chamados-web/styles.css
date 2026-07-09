@@ -255,6 +255,7 @@ table.lista td.aud-detalhe { white-space: normal; min-width: 240px; max-width: 4
 .chip-pago { background: var(--verde-fundo); color: var(--verde); }
 .chip-tipo-viagem { background: transparent; color: var(--primario); }
 .chip-tipo-compra { background: transparent; color: var(--amarelo); }
+.chip-tipo-colaborador { background: transparent; color: var(--laranja); }
 .chip-futuro { background: var(--amarelo-marca-fundo); color: var(--amarelo); border-style: dashed; }
 
 /* ---------- abas ---------- */

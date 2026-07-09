@@ -429,9 +429,16 @@ rota('GET', '/api/chamados', null, (ctx) => {
 });
 
 rota('POST', '/api/chamados', null, (ctx) => {
-  const tipo = ctx.body.tipo === 'compra' ? 'compra' : 'viagem';
-  const valorTotalCent = centavos(ctx.body.valorTotalCent);
-  if (!valorTotalCent) return erro(ctx.res, 400, 'Informe um valor total válido (maior que zero).');
+  const tipo = ctx.body.tipo === 'compra' ? 'compra'
+    : ctx.body.tipo === 'colaborador' ? 'colaborador'
+    : 'viagem';
+  // Valor é obrigatório só no transporte (o 70/30 depende dele). Compra e
+  // viagem de colaborador podem abrir sem valor (definido depois, ao pagar
+  // ou pelos comprovantes anexados).
+  const valorTotalCent = centavos(ctx.body.valorTotalCent) || 0;
+  if (tipo === 'viagem' && !valorTotalCent) {
+    return erro(ctx.res, 400, 'Informe um valor total válido (maior que zero).');
+  }
 
   const base = {
     id: d.novoIdChamado(),
@@ -453,6 +460,7 @@ rota('POST', '/api/chamados', null, (ctx) => {
       fornecedor: txt(ctx.body.compra && ctx.body.compra.fornecedor, 120),
     };
     if (!compra.descricao) return erro(ctx.res, 400, 'Informe a descrição da compra.');
+    const valorTxt = valorTotalCent ? reaisFmt(valorTotalCent) : 'a definir';
     chamado = Object.assign(base, {
       compra,
       veiculo: null,
@@ -469,18 +477,73 @@ rota('POST', '/api/chamados', null, (ctx) => {
       // aberto → finalizado (compra paga) | cancelado
     });
     historico(chamado, ctx.usuario, 'Chamado de compra aberto.',
-      compra.descricao + ' · Valor ' + reaisFmt(valorTotalCent));
+      compra.descricao + ' · Valor ' + valorTxt);
     d.db.chamados.push(chamado);
     auditar(ctx.usuario, 'Abriu chamado de compra ' + chamado.id,
       compra.descricao + (compra.fornecedor ? ' · Fornecedor: ' + compra.fornecedor : '') +
-      ' · ' + reaisFmt(valorTotalCent), ctx.ip);
+      ' · Valor ' + valorTxt, ctx.ip);
     criarNotificacao(
       'novo_chamado', chamado,
       'Nova compra ' + chamado.id + ' — ' + ctx.usuario.nome,
       'Solicitante: ' + ctx.usuario.nome +
         '. Compra: ' + compra.descricao +
         (compra.fornecedor ? '. Fornecedor: ' + compra.fornecedor : '') +
-        '. Valor: ' + reaisFmt(valorTotalCent) + '.'
+        '. Valor: ' + valorTxt + '.'
+    );
+  } else if (tipo === 'colaborador') {
+    // Chamado de VIAGEM DE COLABORADOR: pagamento único (reembolso), com
+    // comprovantes por categoria (hotel, passagens, alimentação).
+    const vc = ctx.body.colaborador || {};
+    const dataIda = normDataViagem(vc.dataIda);
+    if (!dataIda) return erro(ctx.res, 400, 'Informe a data de ida da viagem.');
+    const dataVolta = normDataViagem(vc.dataVolta);
+    if (dataVolta === null) return erro(ctx.res, 400, 'Data de volta inválida.');
+    const colaborador = {
+      nome: txt(vc.nome, 80),
+      destino: txt(vc.destino, 160),
+      dataIda,
+      dataVolta: dataVolta || null,
+      motivo: txt(vc.motivo, 300),
+    };
+    if (!colaborador.nome) return erro(ctx.res, 400, 'Informe o nome do colaborador.');
+    if (!colaborador.destino) return erro(ctx.res, 400, 'Informe o destino da viagem.');
+    const valorTxt = valorTotalCent ? reaisFmt(valorTotalCent) : 'a definir pelos comprovantes';
+    chamado = Object.assign(base, {
+      colaborador,
+      compra: null,
+      veiculo: null,
+      condutor: null,
+      rota: '',
+      dataViagem: dataIda,   // entra nos relatórios pela data de ida
+      anexos: { hotel: [], passagem: [], alimentacao: [] },
+      adiantamentoCent: 0,
+      saldoCent: 0,
+      adiantamentoPagoEm: null,
+      encerramentoConfirmadoEm: null,
+      lembreteSaldoEm: null,
+      saldoPagoEm: null,
+      compraPagaEm: null,
+      // aberto → finalizado (pagamento registrado) | cancelado
+    });
+    historico(chamado, ctx.usuario, 'Chamado de viagem de colaborador aberto.',
+      colaborador.nome + ' · ' + colaborador.destino +
+      ' · Ida ' + dataViagemFmt(dataIda) +
+      (colaborador.dataVolta ? ' · Volta ' + dataViagemFmt(colaborador.dataVolta) : '') +
+      ' · Valor ' + valorTxt);
+    d.db.chamados.push(chamado);
+    auditar(ctx.usuario, 'Abriu chamado de viagem de colaborador ' + chamado.id,
+      colaborador.nome + ' · ' + colaborador.destino + ' · ida ' + dataViagemFmt(dataIda) +
+      ' · Valor ' + valorTxt, ctx.ip);
+    criarNotificacao(
+      'novo_chamado', chamado,
+      'Nova viagem de colaborador ' + chamado.id + ' — ' + ctx.usuario.nome,
+      'Solicitante: ' + ctx.usuario.nome +
+        '. Colaborador: ' + colaborador.nome +
+        '. Destino: ' + colaborador.destino +
+        '. Ida: ' + dataViagemFmt(dataIda) +
+        (colaborador.dataVolta ? '. Volta: ' + dataViagemFmt(colaborador.dataVolta) : '') +
+        (colaborador.motivo ? '. Motivo: ' + colaborador.motivo : '') +
+        '. Valor: ' + valorTxt + '.'
     );
   } else {
     // Chamado de VIAGEM (adiantamento 70/30).
@@ -560,7 +623,7 @@ rota('GET', '/api/chamados/:id', null, (ctx) => {
 rota('POST', '/api/chamados/:id/adiantamento-pago', ['financeiro', 'admin'], (ctx) => {
   const chamado = acharChamado(ctx.params.id);
   if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
-  if (chamado.tipo === 'compra') return erro(ctx.res, 400, 'Chamado de compra não tem adiantamento.');
+  if (chamado.tipo !== 'viagem') return erro(ctx.res, 400, 'Só chamados de transporte têm adiantamento 70/30.');
   if (chamado.status === 'cancelado') return erro(ctx.res, 400, 'Chamado cancelado.');
   if (chamado.adiantamentoPagoEm) return erro(ctx.res, 400, 'Adiantamento já registrado como pago.');
   chamado.adiantamentoPagoEm = d.agora();
@@ -577,7 +640,7 @@ rota('POST', '/api/chamados/:id/encerrar-viagem', null, (ctx) => {
   const chamado = acharChamado(ctx.params.id);
   if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
   if (!podeVerChamado(ctx.usuario, chamado)) return erro(ctx.res, 403, 'Sem permissão.');
-  if (chamado.tipo === 'compra') return erro(ctx.res, 400, 'Chamado de compra não tem viagem para encerrar.');
+  if (chamado.tipo !== 'viagem') return erro(ctx.res, 400, 'Só chamados de transporte têm encerramento de viagem.');
   if (chamado.status === 'cancelado') return erro(ctx.res, 400, 'Chamado cancelado.');
   if (chamado.encerramentoConfirmadoEm) return erro(ctx.res, 400, 'Encerramento já confirmado.');
   chamado.encerramentoConfirmadoEm = d.agora();
@@ -600,7 +663,7 @@ rota('POST', '/api/chamados/:id/encerrar-viagem', null, (ctx) => {
 rota('POST', '/api/chamados/:id/saldo-pago', ['financeiro', 'admin'], (ctx) => {
   const chamado = acharChamado(ctx.params.id);
   if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
-  if (chamado.tipo === 'compra') return erro(ctx.res, 400, 'Chamado de compra não tem saldo 70/30.');
+  if (chamado.tipo !== 'viagem') return erro(ctx.res, 400, 'Só chamados de transporte têm saldo 70/30.');
   if (chamado.status === 'cancelado') return erro(ctx.res, 400, 'Chamado cancelado.');
   if (chamado.saldoPagoEm) return erro(ctx.res, 400, 'Saldo já registrado como pago.');
   if (!chamado.encerramentoConfirmadoEm) return erro(ctx.res, 400, 'Confirme o encerramento da viagem antes de pagar o saldo.');
@@ -614,18 +677,27 @@ rota('POST', '/api/chamados/:id/saldo-pago', ['financeiro', 'admin'], (ctx) => {
   sendJson(ctx.res, 200, { chamado });
 });
 
-// Compra: pagamento único registrado pelo financeiro.
+// Compra e viagem de colaborador: pagamento único registrado pelo financeiro.
 rota('POST', '/api/chamados/:id/compra-paga', ['financeiro', 'admin'], (ctx) => {
   const chamado = acharChamado(ctx.params.id);
   if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
-  if (chamado.tipo !== 'compra') return erro(ctx.res, 400, 'Este chamado não é de compra.');
+  if (chamado.tipo !== 'compra' && chamado.tipo !== 'colaborador') {
+    return erro(ctx.res, 400, 'Este chamado não é de pagamento único.');
+  }
   if (chamado.status === 'cancelado') return erro(ctx.res, 400, 'Chamado cancelado.');
-  if (chamado.compraPagaEm) return erro(ctx.res, 400, 'Compra já registrada como paga.');
+  if (chamado.compraPagaEm) return erro(ctx.res, 400, 'Pagamento já registrado.');
+  // O financeiro pode informar/ajustar o valor no momento do pagamento
+  // (compras e viagens de colaborador podem ser abertas sem valor).
+  const valorInformado = centavos(ctx.body.valorTotalCent);
+  if (valorInformado) chamado.valorTotalCent = valorInformado;
+  const oQue = chamado.tipo === 'colaborador' ? 'Viagem do colaborador paga' : 'Compra paga';
+  const valorTxt = chamado.valorTotalCent ? ' (' + reaisFmt(chamado.valorTotalCent) + ')' : '';
   chamado.compraPagaEm = d.agora();
   chamado.status = 'finalizado';
-  historico(chamado, ctx.usuario, 'Compra paga (' + reaisFmt(chamado.valorTotalCent) + '). Chamado finalizado.');
+  historico(chamado, ctx.usuario, oQue + valorTxt + '. Chamado finalizado.');
   reconhecerNotificacoesDoChamado(chamado.id, ctx.usuario, null);
-  auditar(ctx.usuario, 'Marcou compra como paga (chamado finalizado)', chamado.id + ' · ' + reaisFmt(chamado.valorTotalCent), ctx.ip);
+  auditar(ctx.usuario, 'Registrou pagamento único (chamado finalizado)',
+    chamado.id + (valorTxt ? ' ·' + valorTxt : ''), ctx.ip);
   d.flush();
   notifyChange('chamados');
   sendJson(ctx.res, 200, { chamado });
@@ -644,14 +716,25 @@ rota('POST', '/api/chamados/:id/cancelar', ['admin'], (ctx) => {
   sendJson(ctx.res, 200, { chamado });
 });
 
-// ---- anexos (fotos de entrada e saída da viagem) ----------------------------
+// ---- anexos ------------------------------------------------------------------
+// Transporte: fotos de entrada e saída da viagem.
+// Viagem de colaborador: comprovantes de hotel, passagens e alimentação.
+function categoriasAnexo(chamado) {
+  return chamado.tipo === 'colaborador'
+    ? { hotel: 'Comprovante de hotel', passagem: 'Comprovante de passagem', alimentacao: 'Comprovante de alimentação' }
+    : { entrada: 'Foto de entrada', saida: 'Foto de saída' };
+}
+
 rota('POST', '/api/chamados/:id/anexos', null, (ctx) => {
   const chamado = acharChamado(ctx.params.id);
   if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
   if (!podeVerChamado(ctx.usuario, chamado)) return erro(ctx.res, 403, 'Sem permissão.');
   if (chamado.status === 'cancelado') return erro(ctx.res, 400, 'Chamado cancelado.');
-  const tipo = ctx.body.tipo === 'saida' ? 'saida' : ctx.body.tipo === 'entrada' ? 'entrada' : null;
-  if (!tipo) return erro(ctx.res, 400, 'Tipo do anexo deve ser "entrada" ou "saida".');
+  const categorias = categoriasAnexo(chamado);
+  const tipo = categorias[ctx.body.tipo] ? String(ctx.body.tipo) : null;
+  if (!tipo) {
+    return erro(ctx.res, 400, 'Tipo do anexo deve ser: ' + Object.keys(categorias).join(', ') + '.');
+  }
   const mime = String(ctx.body.mime || '');
   const ext = IMAGENS[mime];
   if (!ext) return erro(ctx.res, 400, 'Envie uma imagem PNG, JPG, WEBP ou GIF.');
@@ -676,9 +759,10 @@ rota('POST', '/api/chamados/:id/anexos', null, (ctx) => {
     em: d.agora(),
     por: ctx.usuario.nome,
   };
+  if (!chamado.anexos[tipo]) chamado.anexos[tipo] = [];
   chamado.anexos[tipo].push(anexo);
-  historico(chamado, ctx.usuario, 'Foto de ' + (tipo === 'entrada' ? 'entrada' : 'saída') + ' anexada.', anexo.nome);
-  auditar(ctx.usuario, 'Anexou foto de ' + (tipo === 'entrada' ? 'entrada' : 'saída'), chamado.id + ' · ' + anexo.nome, ctx.ip);
+  historico(chamado, ctx.usuario, categorias[tipo] + ' anexado(a).', anexo.nome);
+  auditar(ctx.usuario, 'Anexou: ' + categorias[tipo].toLowerCase(), chamado.id + ' · ' + anexo.nome, ctx.ip);
   d.flush();
   notifyChange('chamados');
   sendJson(ctx.res, 200, { anexo, chamado });
@@ -688,7 +772,9 @@ rota('GET', '/api/chamados/:id/anexos/:anexoId', null, (ctx) => {
   const chamado = acharChamado(ctx.params.id);
   if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
   if (!podeVerChamado(ctx.usuario, chamado)) return erro(ctx.res, 403, 'Sem permissão.');
-  const anexo = chamado.anexos.entrada.concat(chamado.anexos.saida).find((a) => a.id === ctx.params.anexoId);
+  const anexo = Object.values(chamado.anexos)
+    .reduce((todos, lista) => todos.concat(lista), [])
+    .find((a) => a.id === ctx.params.anexoId);
   if (!anexo) return erro(ctx.res, 404, 'Anexo não encontrado.');
   const file = path.join(d.ANEXOS_DIR, chamado.id, anexo.id + anexo.ext);
   fs.readFile(file, (err, data) => {
@@ -702,14 +788,16 @@ rota('DELETE', '/api/chamados/:id/anexos/:anexoId', null, (ctx) => {
   if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
   if (!podeVerChamado(ctx.usuario, chamado)) return erro(ctx.res, 403, 'Sem permissão.');
   if (chamado.status === 'finalizado') return erro(ctx.res, 400, 'Chamado finalizado: anexos não podem mais ser removidos.');
-  for (const tipo of ['entrada', 'saida']) {
+  const categorias = categoriasAnexo(chamado);
+  for (const tipo of Object.keys(chamado.anexos)) {
     const i = chamado.anexos[tipo].findIndex((a) => a.id === ctx.params.anexoId);
     if (i >= 0) {
       const anexo = chamado.anexos[tipo][i];
+      const rotulo = categorias[tipo] || 'Anexo';
       chamado.anexos[tipo].splice(i, 1);
       try { fs.unlinkSync(path.join(d.ANEXOS_DIR, chamado.id, anexo.id + anexo.ext)); } catch (e) { /* ignore */ }
-      historico(chamado, ctx.usuario, 'Foto de ' + (tipo === 'entrada' ? 'entrada' : 'saída') + ' removida.', anexo.nome);
-      auditar(ctx.usuario, 'Removeu foto de ' + (tipo === 'entrada' ? 'entrada' : 'saída'), chamado.id + ' · ' + anexo.nome, ctx.ip);
+      historico(chamado, ctx.usuario, rotulo + ' removido(a).', anexo.nome);
+      auditar(ctx.usuario, 'Removeu: ' + rotulo.toLowerCase(), chamado.id + ' · ' + anexo.nome, ctx.ip);
       d.flush();
       notifyChange('chamados');
       return sendJson(ctx.res, 200, { ok: true, chamado });
@@ -756,9 +844,13 @@ rota('GET', '/api/relatorios/movimento', ['financeiro', 'admin'], (ctx) => {
       solicitante: c.solicitante.nome,
       descricao: c.tipo === 'compra'
         ? (c.compra ? c.compra.descricao : '')
-        : (c.veiculo ? (c.veiculo.placa + ' · ' + c.veiculo.modelo) : ''),
+        : c.tipo === 'colaborador'
+          ? (c.colaborador ? 'Colaborador — ' + c.colaborador.destino : '')
+          : (c.veiculo ? (c.veiculo.placa + ' · ' + c.veiculo.modelo) : ''),
       fornecedor: (c.tipo === 'compra' && c.compra) ? c.compra.fornecedor : '',
-      condutor: (c.tipo !== 'compra' && c.condutor) ? c.condutor.nome : '',
+      condutor: c.tipo === 'colaborador'
+        ? (c.colaborador ? c.colaborador.nome : '')
+        : (c.tipo !== 'compra' && c.condutor) ? c.condutor.nome : '',
       rota: c.rota || '',
       dataViagem: c.dataViagem || null,
       valorTotalCent: c.valorTotalCent,

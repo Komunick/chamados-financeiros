@@ -17,6 +17,8 @@
     filtroBusca: '',
     filtroStatusCompra: '',
     filtroBuscaCompra: '',
+    filtroStatusColab: '',
+    filtroBuscaColab: '',
     filtroStatusHist: '',
     filtroBuscaHist: '',
     sse: null,
@@ -76,14 +78,20 @@
   };
   const STATUS_ATIVOS = ['aberto', 'adiantamento_pago', 'viagem_encerrada'];
   const STATUS_HISTORICO = ['finalizado', 'cancelado'];
-  const TIPO_LABEL = { viagem: 'Viagem', compra: 'Compra' };
+  const TIPO_LABEL = { viagem: 'Transporte', compra: 'Compra', colaborador: 'Colaborador' };
   const chipStatus = (st) => el('span', { class: 'chip chip-' + st }, STATUS_LABEL[st] || st);
   const chipTipo = (t) => el('span', { class: 'chip chip-tipo-' + (t || 'viagem') }, TIPO_LABEL[t || 'viagem']);
   const ehFinanceiro = () => state.usuario && (state.usuario.papel === 'financeiro' || state.usuario.papel === 'admin');
   const ehAdmin = () => state.usuario && state.usuario.papel === 'admin';
   const resumoChamado = (c) => c.tipo === 'compra'
     ? (c.compra ? c.compra.descricao : '')
-    : (c.veiculo ? c.veiculo.placa + ' · ' + c.veiculo.modelo : '');
+    : c.tipo === 'colaborador'
+      ? (c.colaborador ? c.colaborador.nome + ' → ' + c.colaborador.destino : '')
+      : (c.veiculo ? c.veiculo.placa + ' · ' + c.veiculo.modelo : '');
+  // Compras e viagens de colaborador podem abrir sem valor definido.
+  const fmtValorChamado = (c) => c.valorTotalCent
+    ? fmtMoeda(c.valorTotalCent)
+    : el('span', { class: 'mudo' }, 'A definir');
 
   // ------------------------------------------------- máscaras (padrão BR)
   const soDigitos = (s) => String(s || '').replace(/\D/g, '');
@@ -249,7 +257,8 @@
     const nav = $('#topo-nav');
     nav.innerHTML = '';
     const links = [
-      ['#/viagens', 'Viagens'],
+      ['#/viagens', 'Transporte'],
+      ['#/colaborador', 'Colaborador'],
       ['#/compras', 'Compras'],
       ['#/novo', 'Novo chamado'],
       ['#/historico', 'Histórico'],
@@ -276,8 +285,12 @@
     const rota = navAtual();
     const cont = $('#conteudo');
     try {
-      if (rota === '/novo' || rota === '/novo/compra') return renderNovo(cont, rota === '/novo/compra' ? 'compra' : 'viagem');
+      if (rota === '/novo' || rota === '/novo/compra' || rota === '/novo/colaborador') {
+        return renderNovo(cont, rota === '/novo/compra' ? 'compra'
+          : rota === '/novo/colaborador' ? 'colaborador' : 'viagem');
+      }
       if (rota === '/compras') return await renderLista(cont, 'compra');
+      if (rota === '/colaborador') return await renderLista(cont, 'colaborador');
       if (rota === '/historico') return await renderHistorico(cont);
       if (rota === '/telefones') return await renderTelefones(cont);
       if (rota === '/relatorios' && ehFinanceiro()) return await renderRelatorios(cont);
@@ -317,20 +330,33 @@
         c.solicitante.nome,
         c.compra ? c.compra.descricao : '',
         (c.compra && c.compra.fornecedor) || '—',
-        fmtMoeda(c.valorTotalCent),
+        fmtValorChamado(c),
+        chipStatus(c.status),
+        el('span', { class: 'mudo' }, fmtData(c.criadoEm)),
+      ];
+    } else if (modo === 'colaborador') {
+      cabecalhos = ['Nº', 'Solicitante', 'Colaborador', 'Destino', 'Ida', 'Volta', 'Valor', 'Status', 'Aberto em'];
+      colunas = (c) => [
+        el('strong', null, c.id),
+        c.solicitante.nome,
+        c.colaborador ? c.colaborador.nome : '',
+        c.colaborador ? c.colaborador.destino : '',
+        c.colaborador ? fmtDataViagem(c.colaborador.dataIda) : '—',
+        (c.colaborador && c.colaborador.dataVolta) ? fmtDataViagem(c.colaborador.dataVolta) : '—',
+        fmtValorChamado(c),
         chipStatus(c.status),
         el('span', { class: 'mudo' }, fmtData(c.criadoEm)),
       ];
     } else {
-      cabecalhos = ['Nº', 'Tipo', 'Solicitante', 'Veículo / Compra', 'Rota', 'Data da viagem', 'Valor total', 'Status', 'Aberto em'];
+      cabecalhos = ['Nº', 'Tipo', 'Solicitante', 'Resumo', 'Rota', 'Data da viagem', 'Valor total', 'Status', 'Aberto em'];
       colunas = (c) => [
         el('strong', null, c.id),
         chipTipo(c.tipo),
         c.solicitante.nome,
         resumoChamado(c),
-        c.tipo === 'compra' ? '—' : (c.rota || '—'),
+        c.tipo === 'compra' || c.tipo === 'colaborador' ? '—' : (c.rota || '—'),
         c.tipo === 'compra' ? '—' : fmtDataViagem(c.dataViagem),
-        fmtMoeda(c.valorTotalCent),
+        fmtValorChamado(c),
         chipStatus(c.status),
         el('span', { class: 'mudo' }, fmtData(c.criadoEm)),
       ];
@@ -361,6 +387,8 @@
         c.condutor ? c.condutor.nome : '',
         c.compra ? c.compra.descricao : '',
         c.compra ? c.compra.fornecedor : '',
+        c.colaborador ? c.colaborador.nome : '',
+        c.colaborador ? c.colaborador.destino : '',
       ].join(' ').toLowerCase().includes(b));
     }
     return r;
@@ -372,15 +400,37 @@
     state.chamados = r.chamados;
     cont.innerHTML = '';
 
-    const ehCompra = tipoAba === 'compra';
-    // Filtros independentes por aba, para uma busca não "vazar" na outra.
-    const fBusca = ehCompra ? 'filtroBuscaCompra' : 'filtroBusca';
-    const fStatus = ehCompra ? 'filtroStatusCompra' : 'filtroStatus';
+    // Textos, rota do "novo" e filtros próprios de cada aba (uma busca não
+    // "vaza" na outra).
+    const cfg = {
+      viagem: {
+        titulo: 'Chamados de transporte em andamento',
+        botao: 'Novo transporte', hrefNovo: '#/novo',
+        placeholder: 'Buscar por nº, placa, condutor, rota, solicitante…',
+        vazio: 'Nenhum transporte em andamento. Clique em "Novo transporte" para abrir o primeiro.',
+        fBusca: 'filtroBusca', fStatus: 'filtroStatus', statusDaAba: STATUS_ATIVOS,
+      },
+      compra: {
+        titulo: 'Chamados de compra em andamento',
+        botao: 'Nova compra', hrefNovo: '#/novo/compra',
+        placeholder: 'Buscar por nº, descrição, fornecedor, solicitante…',
+        vazio: 'Nenhuma compra em andamento. Clique em "Nova compra" para abrir a primeira.',
+        fBusca: 'filtroBuscaCompra', fStatus: 'filtroStatusCompra', statusDaAba: ['aberto'],
+      },
+      colaborador: {
+        titulo: 'Viagens de colaborador em andamento',
+        botao: 'Nova viagem', hrefNovo: '#/novo/colaborador',
+        placeholder: 'Buscar por nº, colaborador, destino, solicitante…',
+        vazio: 'Nenhuma viagem de colaborador em andamento. Clique em "Nova viagem" para abrir a primeira.',
+        fBusca: 'filtroBuscaColab', fStatus: 'filtroStatusColab', statusDaAba: ['aberto'],
+      },
+    }[tipoAba];
+    const { fBusca, fStatus } = cfg;
 
     const filtros = el('div', { class: 'filtros' },
       el('input', {
         type: 'search',
-        placeholder: ehCompra ? 'Buscar por nº, descrição, fornecedor, solicitante…' : 'Buscar por nº, placa, condutor, rota, solicitante…',
+        placeholder: cfg.placeholder,
         value: state[fBusca],
         oninput: (e) => { state[fBusca] = e.target.value; desenhar(); },
       }),
@@ -388,8 +438,7 @@
         const s = el('select', {
           onchange: (e) => { state[fStatus] = e.target.value; desenhar(); },
         }, el('option', { value: '' }, 'Todos os status em andamento'));
-        const statusDaAba = ehCompra ? ['aberto'] : STATUS_ATIVOS;
-        for (const v of statusDaAba) {
+        for (const v of cfg.statusDaAba) {
           const o = el('option', { value: v }, STATUS_LABEL[v]);
           if (state[fStatus] === v) o.selected = true;
           s.append(o);
@@ -401,9 +450,9 @@
     const envolta = el('div', { class: 'tabela-envolta' });
     const cartao = el('div', { class: 'cartao' },
       el('div', { class: 'linha-topo' },
-        el('h2', null, ehCompra ? 'Chamados de compra em andamento' : 'Chamados de viagem em andamento'),
-        el('a', { href: ehCompra ? '#/novo/compra' : '#/novo' },
-          el('button', { class: 'btn btn-primario' }, ehCompra ? 'Nova compra' : 'Nova viagem'))),
+        el('h2', null, cfg.titulo),
+        el('a', { href: cfg.hrefNovo },
+          el('button', { class: 'btn btn-primario' }, cfg.botao))),
       el('p', { class: 'mudo' }, 'Chamados finalizados e cancelados ficam na aba Histórico.'),
       filtros, envolta);
     cont.append(cartao);
@@ -414,10 +463,7 @@
       const lista = filtrarChamados(ativos, state[fBusca], state[fStatus]);
       envolta.innerHTML = '';
       if (!lista.length) {
-        envolta.append(el('div', { class: 'vazio' },
-          ehCompra
-            ? 'Nenhuma compra em andamento. Clique em "Nova compra" para abrir a primeira.'
-            : 'Nenhuma viagem em andamento. Clique em "Nova viagem" para abrir a primeira.'));
+        envolta.append(el('div', { class: 'vazio' }, cfg.vazio));
         return;
       }
       envolta.append(tabelaChamados(lista, tipoAba));
@@ -574,7 +620,8 @@
     const validos = (l) => l.filter((c) => c.status !== 'cancelado');
     const soma = (l) => validos(l).reduce((s, c) => s + c.valorTotalCent, 0);
     // Quanto já foi pago e quanto ainda resta de cada chamado.
-    const pagoCent = (c) => c.tipo === 'compra'
+    // Compra e viagem de colaborador têm pagamento único; transporte, 70/30.
+    const pagoCent = (c) => (c.tipo === 'compra' || c.tipo === 'colaborador')
       ? (c.compraPagaEm ? c.valorTotalCent : 0)
       : (c.adiantamentoPagoEm ? c.adiantamentoCent : 0) + (c.saldoPagoEm ? c.saldoCent : 0);
     const restanteCent = (c) => c.valorTotalCent - pagoCent(c);
@@ -825,7 +872,7 @@
     const inputValor = el('input', { type: 'text', inputmode: 'decimal', placeholder: 'Ex.: 1.500,00', required: '' });
     const atualizarPrevia = () => {
       const cent = parseMoeda(inputValor.value);
-      if (!cent || tipo === 'compra') { previa.classList.add('oculto'); return; }
+      if (!cent || tipo !== 'viagem') { previa.classList.add('oculto'); return; }
       const adiant = Math.round(cent * 0.7);
       previa.classList.remove('oculto');
       previa.innerHTML =
@@ -923,6 +970,13 @@
     const compraDesc = campo('O que será comprado? *', { placeholder: 'Ex.: 4 pneus 295/80 R22.5' });
     const compraForn = campo('Fornecedor', { placeholder: 'Ex.: Pneus Brasil Ltda.' });
 
+    // ---- campos de viagem de colaborador ----
+    const colabNome = campo('Nome do colaborador *', { placeholder: 'Quem vai viajar' });
+    const colabDestino = campo('Destino *', { placeholder: 'Ex.: Salvador/BA' });
+    const colabIda = campo('Data de ida *', { type: 'date' });
+    const colabVolta = campo('Data de volta', { type: 'date' });
+    const colabMotivo = campo('Motivo da viagem', { placeholder: 'Ex.: treinamento, visita a cliente…' });
+
     const obs = el('textarea', { rows: '3', placeholder: 'Motivo, detalhes, observações…' });
 
     const secViagemVeiculo = el('div', null,
@@ -938,26 +992,47 @@
       el('h3', { class: 'form-secao' }, 'Dados da compra'),
       el('div', { class: 'form-grade' }, compraDesc.rotulo, compraForn.rotulo));
 
-    const rotuloValor = el('label', null, 'Valor total (R$) *', inputValor);
+    const secColaborador = el('div', { class: 'oculto' },
+      el('h3', { class: 'form-secao' }, 'Dados da viagem do colaborador'),
+      el('div', { class: 'form-grade' },
+        colabNome.rotulo, colabDestino.rotulo, colabIda.rotulo,
+        colabVolta.rotulo, colabMotivo.rotulo),
+      el('p', { class: 'mudo' },
+        'Depois de abrir o chamado, anexe os comprovantes da viagem — hotel, ' +
+        'passagens e alimentação — na aba "Comprovantes" do próprio chamado.'));
+
+    const rotuloValorTxt = el('span', null, 'Valor total (R$) *');
+    const rotuloValor = el('label', null, rotuloValorTxt, inputValor);
     const dicaValor = el('p', { class: 'mudo' },
       'O sistema calcula automaticamente o adiantamento de 70% e o saldo de 30%.');
 
     // ---- seletor de tipo ----
-    const btnViagem = el('button', { type: 'button', class: 'tipo-btn ativo' }, 'Adiantamento de viagem');
+    const btnViagem = el('button', { type: 'button', class: 'tipo-btn ativo' }, 'Adiantamento de transporte');
+    const btnColaborador = el('button', { type: 'button', class: 'tipo-btn' }, 'Viagem de colaborador');
     const btnCompra = el('button', { type: 'button', class: 'tipo-btn' }, 'Compra');
     function definirTipo(novo) {
       tipo = novo;
       btnViagem.classList.toggle('ativo', tipo === 'viagem');
+      btnColaborador.classList.toggle('ativo', tipo === 'colaborador');
       btnCompra.classList.toggle('ativo', tipo === 'compra');
       secViagemVeiculo.classList.toggle('oculto', tipo !== 'viagem');
+      secColaborador.classList.toggle('oculto', tipo !== 'colaborador');
       secCompra.classList.toggle('oculto', tipo !== 'compra');
+      // Valor só é obrigatório no transporte (o 70/30 depende dele).
+      const valorObrigatorio = tipo === 'viagem';
+      rotuloValorTxt.textContent = valorObrigatorio
+        ? 'Valor total (R$) *' : 'Valor total (R$) — opcional';
+      if (valorObrigatorio) inputValor.setAttribute('required', '');
+      else inputValor.removeAttribute('required');
       dicaValor.textContent = tipo === 'viagem'
         ? 'O sistema calcula automaticamente o adiantamento de 70% e o saldo de 30%.'
-        : '';
-      dicaValor.classList.toggle('oculto', tipo !== 'viagem');
+        : tipo === 'colaborador'
+          ? 'Pode ficar em branco: o valor é definido depois, pelos comprovantes anexados à viagem.'
+          : 'Pode ficar em branco: o financeiro informa o valor ao registrar o pagamento.';
       atualizarPrevia();
     }
     btnViagem.addEventListener('click', () => definirTipo('viagem'));
+    btnColaborador.addEventListener('click', () => definirTipo('colaborador'));
     definirTipo(tipo); // sincroniza seções e botões com o tipo inicial da aba
     btnCompra.addEventListener('click', () => definirTipo('compra'));
 
@@ -965,11 +1040,27 @@
     const form = el('form', {
       onsubmit: async (e) => {
         e.preventDefault();
+        // Valor: obrigatório só no transporte; nos demais pode ficar em branco.
         const valorTotalCent = parseMoeda(inputValor.value);
-        if (!valorTotalCent) { toast('Informe um valor total válido.', 'erro'); return; }
+        if (tipo === 'viagem' && !valorTotalCent) { toast('Informe um valor total válido.', 'erro'); return; }
+        if (inputValor.value.trim() && !valorTotalCent) { toast('Valor inválido. Use o formato 1.500,00 ou deixe em branco.', 'erro'); inputValor.focus(); return; }
 
-        const corpo = { tipo, valorTotalCent, observacoes: obs.value };
-        if (tipo === 'viagem') {
+        const corpo = { tipo, valorTotalCent: valorTotalCent || 0, observacoes: obs.value };
+        if (tipo === 'colaborador') {
+          if (!colabNome.input.value.trim()) { toast('Informe o nome do colaborador.', 'erro'); colabNome.input.focus(); return; }
+          if (!colabDestino.input.value.trim()) { toast('Informe o destino da viagem.', 'erro'); colabDestino.input.focus(); return; }
+          if (!colabIda.input.value) { toast('Informe a data de ida.', 'erro'); colabIda.input.focus(); return; }
+          if (colabVolta.input.value && colabVolta.input.value < colabIda.input.value) {
+            toast('A data de volta não pode ser antes da ida.', 'erro'); colabVolta.input.focus(); return;
+          }
+          corpo.colaborador = {
+            nome: colabNome.input.value,
+            destino: colabDestino.input.value,
+            dataIda: colabIda.input.value,
+            dataVolta: colabVolta.input.value,
+            motivo: colabMotivo.input.value,
+          };
+        } else if (tipo === 'viagem') {
           if (!placaValida(placa.input.value)) { toast('Placa inválida. Use ABC-1234 (antiga) ou ABC1D23 (Mercosul).', 'erro'); placa.input.focus(); return; }
           if (!modelo.input.value.trim()) { toast('Informe o modelo do veículo.', 'erro'); modelo.input.focus(); return; }
           if (!dataViagem.input.value) { toast('Informe a data da viagem.', 'erro'); dataViagem.input.focus(); return; }
@@ -1003,8 +1094,9 @@
       },
     },
       el('h3', { class: 'form-secao' }, 'Tipo de chamado'),
-      el('div', { class: 'tipo-escolha' }, btnViagem, btnCompra),
+      el('div', { class: 'tipo-escolha' }, btnViagem, btnColaborador, btnCompra),
       secViagemVeiculo,
+      secColaborador,
       secCompra,
       el('h3', { class: 'form-secao' }, 'Valor do chamado'),
       dicaValor,
@@ -1013,11 +1105,20 @@
       el('h3', { class: 'form-secao' }, 'Observações'),
       obs,
       el('div', { class: 'acoes-status' }, btn,
-        el('button', { class: 'btn btn-suave', type: 'button', onclick: () => { location.hash = tipo === 'compra' ? '#/compras' : '#/viagens'; } }, 'Cancelar')));
+        el('button', {
+          class: 'btn btn-suave', type: 'button',
+          onclick: () => {
+            location.hash = tipo === 'compra' ? '#/compras'
+              : tipo === 'colaborador' ? '#/colaborador' : '#/viagens';
+          },
+        }, 'Cancelar')));
 
     cont.append(el('div', { class: 'cartao' },
       el('div', { class: 'linha-topo' }, el('h2', null, 'Novo chamado')),
-      el('p', { class: 'mudo' }, 'Escolha o tipo do chamado: adiantamento de viagem (70/30) ou compra (pagamento único).'),
+      el('p', { class: 'mudo' },
+        'Escolha o tipo do chamado: adiantamento de transporte (70/30), ' +
+        'viagem de colaborador (comprovantes de hotel, passagens e alimentação) ' +
+        'ou compra (pagamento único).'),
       form));
   }
 
@@ -1029,6 +1130,11 @@
 
     const abas = c.tipo === 'compra' ? [
       ['financeiro', 'Pagamento'],
+      ['dados', 'Dados'],
+      ['historico', 'Histórico'],
+    ] : c.tipo === 'colaborador' ? [
+      ['financeiro', 'Pagamento'],
+      ['anexos', 'Comprovantes'],
       ['dados', 'Dados'],
       ['historico', 'Histórico'],
     ] : [
@@ -1047,13 +1153,22 @@
 
     const subtitulo = c.tipo === 'compra'
       ? 'Solicitante: ' + c.solicitante.nome + (c.compra && c.compra.fornecedor ? ' · Fornecedor: ' + c.compra.fornecedor : '') + ' · Aberto em ' + fmtData(c.criadoEm)
-      : 'Solicitante: ' + c.solicitante.nome + ' · Condutor: ' + c.condutor.nome +
-        ' · Viagem: ' + fmtDataViagem(c.dataViagem) + (c.rota ? ' · Rota: ' + c.rota : '') +
-        ' · Aberto em ' + fmtData(c.criadoEm);
+      : c.tipo === 'colaborador'
+        ? 'Solicitante: ' + c.solicitante.nome + ' · Colaborador: ' + c.colaborador.nome +
+          ' · Destino: ' + c.colaborador.destino +
+          ' · Ida: ' + fmtDataViagem(c.colaborador.dataIda) +
+          (c.colaborador.dataVolta ? ' · Volta: ' + fmtDataViagem(c.colaborador.dataVolta) : '') +
+          ' · Aberto em ' + fmtData(c.criadoEm)
+        : 'Solicitante: ' + c.solicitante.nome + ' · Condutor: ' + c.condutor.nome +
+          ' · Viagem: ' + fmtDataViagem(c.dataViagem) + (c.rota ? ' · Rota: ' + c.rota : '') +
+          ' · Aberto em ' + fmtData(c.criadoEm);
 
+    const tituloDetalhe = c.tipo === 'compra' ? (c.compra ? c.compra.descricao : 'Compra')
+      : c.tipo === 'colaborador' ? 'Viagem de ' + c.colaborador.nome
+      : c.veiculo.placa;
     cont.append(el('div', { class: 'cartao' },
       el('div', { class: 'linha-topo' },
-        el('h2', null, c.id + ' — ' + (c.tipo === 'compra' ? (c.compra ? c.compra.descricao : 'Compra') : c.veiculo.placa)),
+        el('h2', null, c.id + ' — ' + tituloDetalhe),
         el('div', null, chipTipo(c.tipo), ' ', chipStatus(c.status))),
       el('p', { class: 'mudo' }, subtitulo),
       barraAbas, corpoAba));
@@ -1061,7 +1176,7 @@
     if (state.abaDetalhe === 'anexos' && c.tipo !== 'compra') renderAbaAnexos(corpoAba, c);
     else if (state.abaDetalhe === 'dados') renderAbaDados(corpoAba, c);
     else if (state.abaDetalhe === 'historico') renderAbaHistorico(corpoAba, c);
-    else if (c.tipo === 'compra') renderAbaPagamentoCompra(corpoAba, c);
+    else if (c.tipo === 'compra' || c.tipo === 'colaborador') renderAbaPagamentoCompra(corpoAba, c);
     else renderAbaFinanceiro(corpoAba, c);
   }
 
@@ -1081,19 +1196,40 @@
     } catch (e) { toast(e.message, 'erro'); }
   }
 
+  // Pagamento único: compras e viagens de colaborador.
   function renderAbaPagamentoCompra(corpo, c) {
-    corpo.append(el('div', { class: 'valores' },
-      cartaoValor('Valor da compra', c.valorTotalCent,
-        c.compraPagaEm ? el('span', { class: 'chip chip-pago' }, 'Pago em ' + fmtData(c.compraPagaEm))
-          : el('span', { class: 'chip chip-pendente' }, 'Pendente'),
-        'Pagamento único registrado pelo financeiro.', true)));
+    const ehColab = c.tipo === 'colaborador';
+    const cartao = el('div', { class: 'valor-cartao destaque' },
+      el('div', { class: 'rotulo' }, ehColab ? 'Valor da viagem' : 'Valor da compra'),
+      el('div', { class: 'valor' }, c.valorTotalCent ? fmtMoeda(c.valorTotalCent) : 'A definir'),
+      el('div', null, c.compraPagaEm
+        ? el('span', { class: 'chip chip-pago' }, 'Pago em ' + fmtData(c.compraPagaEm))
+        : el('span', { class: 'chip chip-pendente' }, 'Pendente')),
+      el('div', { class: 'obs' }, c.valorTotalCent
+        ? 'Pagamento único registrado pelo financeiro.'
+        : (ehColab
+          ? 'Sem valor definido — some os comprovantes anexados; o financeiro informa o total ao pagar.'
+          : 'Sem valor definido — o financeiro informa o valor ao registrar o pagamento.')));
+    corpo.append(el('div', { class: 'valores' }, cartao));
 
     const acoes = el('div', { class: 'acoes-status' });
     if (ehFinanceiro() && !c.compraPagaEm && c.status !== 'cancelado') {
       acoes.append(el('button', {
         class: 'btn btn-verde',
-        onclick: () => acaoChamado('/api/chamados/' + c.id + '/compra-paga', 'Compra registrada como paga. Chamado finalizado.'),
-      }, 'Marcar compra como paga'));
+        onclick: () => {
+          let corpoReq = {};
+          if (!c.valorTotalCent) {
+            const digitado = prompt('Valor pago (R$) — ex.: 1.500,00:');
+            if (digitado === null) return;
+            const cent = parseMoeda(digitado);
+            if (!cent) { toast('Valor inválido.', 'erro'); return; }
+            corpoReq = { valorTotalCent: cent };
+          }
+          api('POST', '/api/chamados/' + c.id + '/compra-paga', corpoReq)
+            .then(() => { toast('Pagamento registrado. Chamado finalizado.'); renderRota(); })
+            .catch((e) => toast(e.message, 'erro'));
+        },
+      }, ehColab ? 'Marcar viagem como paga' : 'Marcar compra como paga'));
     }
     if (ehAdmin() && c.status !== 'finalizado' && c.status !== 'cancelado') {
       acoes.append(el('button', {
@@ -1160,7 +1296,7 @@
 
   function renderAbaAnexos(corpo, c) {
     const bloqueado = c.status === 'finalizado' || c.status === 'cancelado';
-    const grupo = (tipo, titulo, dica) => {
+    const grupo = (tipo, titulo, dica, rotuloBotao) => {
       const g = el('div', { class: 'anexo-grupo' }, el('h4', null, titulo), el('p', { class: 'mudo' }, dica));
       if (!bloqueado) {
         const inputArquivo = el('input', { type: 'file', accept: 'image/*', class: 'oculto' });
@@ -1182,12 +1318,13 @@
           leitor.readAsDataURL(arquivo);
         });
         g.append(
-          el('button', { class: 'btn btn-suave', onclick: () => inputArquivo.click() }, 'Anexar foto de ' + (tipo === 'entrada' ? 'entrada' : 'saída')),
+          el('button', { class: 'btn btn-suave', onclick: () => inputArquivo.click() }, rotuloBotao),
           inputArquivo);
       }
       const minis = el('div', { class: 'anexo-miniaturas' });
       const lista = c.anexos[tipo] || [];
-      if (!lista.length) minis.append(el('span', { class: 'mudo' }, 'Nenhuma foto anexada ainda.'));
+      if (!lista.length) minis.append(el('span', { class: 'mudo' },
+        c.tipo === 'colaborador' ? 'Nenhum comprovante anexado ainda.' : 'Nenhuma foto anexada ainda.'));
       for (const a of lista) {
         const url = '/api/chamados/' + c.id + '/anexos/' + a.id + '?token=' + encodeURIComponent(state.token);
         const mini = el('div', { class: 'anexo-mini' },
@@ -1208,9 +1345,16 @@
       g.append(minis);
       return g;
     };
-    corpo.append(el('div', { class: 'anexos-grupos' },
-      grupo('entrada', 'Entrada da viagem', 'Fotos do veículo/odômetro na SAÍDA da base (início da viagem).'),
-      grupo('saida', 'Saída da viagem', 'Fotos do veículo/odômetro no RETORNO (fim da viagem).')));
+    if (c.tipo === 'colaborador') {
+      corpo.append(el('div', { class: 'anexos-grupos' },
+        grupo('hotel', 'Hotel', 'Notas e comprovantes de hospedagem (foto ou print).', 'Anexar comprovante de hotel'),
+        grupo('passagem', 'Passagens', 'Bilhetes e comprovantes de passagens (ônibus, avião, app…).', 'Anexar comprovante de passagem'),
+        grupo('alimentacao', 'Alimentação', 'Notas e recibos de refeições durante a viagem.', 'Anexar comprovante de alimentação')));
+    } else {
+      corpo.append(el('div', { class: 'anexos-grupos' },
+        grupo('entrada', 'Entrada da viagem', 'Fotos do veículo/odômetro na SAÍDA da base (início da viagem).', 'Anexar foto de entrada'),
+        grupo('saida', 'Saída da viagem', 'Fotos do veículo/odômetro no RETORNO (fim da viagem).', 'Anexar foto de saída')));
+    }
     if (bloqueado) corpo.append(el('p', { class: 'mudo' }, 'Chamado ' + STATUS_LABEL[c.status].toLowerCase() + ': os anexos estão travados.'));
   }
 
@@ -1228,8 +1372,32 @@
         bloco('Compra', [
           ['Descrição', c.compra ? c.compra.descricao : ''],
           ['Fornecedor', c.compra ? c.compra.fornecedor : ''],
-          ['Valor', fmtMoeda(c.valorTotalCent)],
+          ['Valor', c.valorTotalCent ? fmtMoeda(c.valorTotalCent) : 'A definir'],
           ['Pagamento', c.compraPagaEm ? 'Pago em ' + fmtData(c.compraPagaEm) : 'Pendente'],
+        ]),
+        bloco('Chamado', [
+          ['Solicitante', c.solicitante.nome],
+          ['Aberto em', fmtData(c.criadoEm)],
+          ['Status', STATUS_LABEL[c.status]],
+          ['Observações', c.observacoes],
+        ])));
+      return;
+    }
+    if (c.tipo === 'colaborador') {
+      const totalComprovantes = Object.values(c.anexos || {})
+        .reduce((n, lista) => n + lista.length, 0);
+      corpo.append(el('div', { class: 'dados-grade' },
+        bloco('Viagem do colaborador', [
+          ['Colaborador', c.colaborador.nome],
+          ['Destino', c.colaborador.destino],
+          ['Ida', fmtDataViagem(c.colaborador.dataIda)],
+          ['Volta', c.colaborador.dataVolta ? fmtDataViagem(c.colaborador.dataVolta) : ''],
+          ['Motivo', c.colaborador.motivo],
+        ]),
+        bloco('Pagamento', [
+          ['Valor', c.valorTotalCent ? fmtMoeda(c.valorTotalCent) : 'A definir'],
+          ['Situação', c.compraPagaEm ? 'Pago em ' + fmtData(c.compraPagaEm) : 'Pendente'],
+          ['Comprovantes', totalComprovantes ? totalComprovantes + ' anexado(s)' : 'Nenhum ainda'],
         ]),
         bloco('Chamado', [
           ['Solicitante', c.solicitante.nome],
