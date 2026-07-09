@@ -15,6 +15,8 @@
     filtroBuscaAud: '',
     filtroStatus: '',
     filtroBusca: '',
+    filtroStatusCompra: '',
+    filtroBuscaCompra: '',
     filtroStatusHist: '',
     filtroBuscaHist: '',
     sse: null,
@@ -225,7 +227,7 @@
 
   // ------------------------------------------------------------------ rotas
   function navAtual() {
-    return (location.hash || '#/chamados').replace(/^#/, '');
+    return (location.hash || '#/viagens').replace(/^#/, '');
   }
 
   // Recarrega a visão atual apenas quando é SEGURO: nunca sobre o formulário
@@ -233,7 +235,7 @@
   // re-render reconstruiria o DOM e apagaria o que foi preenchido.
   function atualizarSeSeguro() {
     if (!state.usuario) return;
-    if (navAtual() === '/novo') return;
+    if (navAtual().startsWith('/novo')) return;
     const a = document.activeElement;
     if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT')) return;
     renderRota();
@@ -243,7 +245,8 @@
     const nav = $('#topo-nav');
     nav.innerHTML = '';
     const links = [
-      ['#/chamados', 'Chamados'],
+      ['#/viagens', 'Viagens'],
+      ['#/compras', 'Compras'],
       ['#/novo', 'Novo chamado'],
       ['#/historico', 'Histórico'],
     ];
@@ -251,9 +254,13 @@
     if (ehFinanceiro()) links.push(['#/notificacoes', 'Notificações']);
     if (ehFinanceiro()) links.push(['#/auditoria', 'Auditoria']);
     if (ehAdmin()) links.push(['#/usuarios', 'Usuários']);
+    const atual = navAtual();
     for (const [href, rotulo] of links) {
       const a = el('a', { href }, rotulo);
-      if (navAtual() === href.slice(1) || (href === '#/chamados' && navAtual().startsWith('/chamado/'))) a.classList.add('ativo');
+      const ativo = atual === href.slice(1) ||
+        (href === '#/viagens' && atual === '/chamados') ||
+        (href === '#/novo' && atual.startsWith('/novo'));
+      if (ativo) a.classList.add('ativo');
       nav.append(a);
     }
   }
@@ -264,7 +271,8 @@
     const rota = navAtual();
     const cont = $('#conteudo');
     try {
-      if (rota === '/novo') return renderNovo(cont);
+      if (rota === '/novo' || rota === '/novo/compra') return renderNovo(cont, rota === '/novo/compra' ? 'compra' : 'viagem');
+      if (rota === '/compras') return await renderLista(cont, 'compra');
       if (rota === '/historico') return await renderHistorico(cont);
       if (rota === '/relatorios' && ehFinanceiro()) return await renderRelatorios(cont);
       if (rota === '/notificacoes' && ehFinanceiro()) return await renderNotificacoes(cont);
@@ -272,7 +280,7 @@
       if (rota === '/usuarios' && ehAdmin()) return await renderUsuarios(cont);
       const m = rota.match(/^\/chamado\/(.+)$/);
       if (m) return await renderDetalhe(cont, decodeURIComponent(m[1]));
-      return await renderLista(cont);
+      return await renderLista(cont, 'viagem'); // '/viagens', '/chamados' e padrão
     } catch (e) {
       cont.innerHTML = '';
       cont.append(el('div', { class: 'cartao' }, el('p', { class: 'erro' }, e.message)));
@@ -280,23 +288,54 @@
   }
 
   // -------------------------------------------- tabela de chamados (comum)
-  function tabelaChamados(lista) {
+  // modo: 'viagem' | 'compra' (colunas do tipo) | 'misto' (histórico, com Tipo)
+  function tabelaChamados(lista, modo) {
+    let cabecalhos, colunas;
+    if (modo === 'viagem') {
+      cabecalhos = ['Nº', 'Solicitante', 'Veículo', 'Condutor', 'Rota', 'Data da viagem', 'Valor total', 'Status', 'Aberto em'];
+      colunas = (c) => [
+        el('strong', null, c.id),
+        c.solicitante.nome,
+        resumoChamado(c),
+        c.condutor ? c.condutor.nome : '—',
+        c.rota || '—',
+        fmtDataViagem(c.dataViagem),
+        fmtMoeda(c.valorTotalCent),
+        chipStatus(c.status),
+        el('span', { class: 'mudo' }, fmtData(c.criadoEm)),
+      ];
+    } else if (modo === 'compra') {
+      cabecalhos = ['Nº', 'Solicitante', 'Descrição', 'Fornecedor', 'Valor', 'Status', 'Aberto em'];
+      colunas = (c) => [
+        el('strong', null, c.id),
+        c.solicitante.nome,
+        c.compra ? c.compra.descricao : '',
+        (c.compra && c.compra.fornecedor) || '—',
+        fmtMoeda(c.valorTotalCent),
+        chipStatus(c.status),
+        el('span', { class: 'mudo' }, fmtData(c.criadoEm)),
+      ];
+    } else {
+      cabecalhos = ['Nº', 'Tipo', 'Solicitante', 'Veículo / Compra', 'Rota', 'Data da viagem', 'Valor total', 'Status', 'Aberto em'];
+      colunas = (c) => [
+        el('strong', null, c.id),
+        chipTipo(c.tipo),
+        c.solicitante.nome,
+        resumoChamado(c),
+        c.tipo === 'compra' ? '—' : (c.rota || '—'),
+        c.tipo === 'compra' ? '—' : fmtDataViagem(c.dataViagem),
+        fmtMoeda(c.valorTotalCent),
+        chipStatus(c.status),
+        el('span', { class: 'mudo' }, fmtData(c.criadoEm)),
+      ];
+    }
     const tabela = el('table', { class: 'lista' },
-      el('thead', null, el('tr', null,
-        ...['Nº', 'Tipo', 'Solicitante', 'Veículo / Compra', 'Rota', 'Data da viagem', 'Valor total', 'Status', 'Aberto em']
-          .map((h) => el('th', null, h)))));
+      el('thead', null, el('tr', null, ...cabecalhos.map((h) => el('th', null, h)))));
     const tbody = el('tbody');
     for (const c of lista) {
-      tbody.append(el('tr', { onclick: () => { location.hash = '#/chamado/' + c.id; } },
-        el('td', null, el('strong', null, c.id)),
-        el('td', null, chipTipo(c.tipo)),
-        el('td', null, c.solicitante.nome),
-        el('td', null, resumoChamado(c)),
-        el('td', null, c.tipo === 'compra' ? '—' : (c.rota || '—')),
-        el('td', null, c.tipo === 'compra' ? '—' : fmtDataViagem(c.dataViagem)),
-        el('td', null, fmtMoeda(c.valorTotalCent)),
-        el('td', null, chipStatus(c.status)),
-        el('td', { class: 'mudo' }, fmtData(c.criadoEm))));
+      const tr = el('tr', { onclick: () => { location.hash = '#/chamado/' + c.id; } });
+      for (const col of colunas(c)) tr.append(el('td', null, col));
+      tbody.append(tr);
     }
     tabela.append(tbody);
     return tabela;
@@ -321,25 +360,32 @@
     return r;
   }
 
-  // ------------------------------------------------------------------ lista
-  async function renderLista(cont) {
+  // ------------------------------------------------------------------ listas (viagens e compras separadas)
+  async function renderLista(cont, tipoAba) {
     const r = await api('GET', '/api/chamados');
     state.chamados = r.chamados;
     cont.innerHTML = '';
 
+    const ehCompra = tipoAba === 'compra';
+    // Filtros independentes por aba, para uma busca não "vazar" na outra.
+    const fBusca = ehCompra ? 'filtroBuscaCompra' : 'filtroBusca';
+    const fStatus = ehCompra ? 'filtroStatusCompra' : 'filtroStatus';
+
     const filtros = el('div', { class: 'filtros' },
       el('input', {
-        type: 'search', placeholder: 'Buscar por nº, placa, condutor, rota, compra…',
-        value: state.filtroBusca,
-        oninput: (e) => { state.filtroBusca = e.target.value; desenhar(); },
+        type: 'search',
+        placeholder: ehCompra ? 'Buscar por nº, descrição, fornecedor, solicitante…' : 'Buscar por nº, placa, condutor, rota, solicitante…',
+        value: state[fBusca],
+        oninput: (e) => { state[fBusca] = e.target.value; desenhar(); },
       }),
       (() => {
         const s = el('select', {
-          onchange: (e) => { state.filtroStatus = e.target.value; desenhar(); },
+          onchange: (e) => { state[fStatus] = e.target.value; desenhar(); },
         }, el('option', { value: '' }, 'Todos os status em andamento'));
-        for (const v of STATUS_ATIVOS) {
+        const statusDaAba = ehCompra ? ['aberto'] : STATUS_ATIVOS;
+        for (const v of statusDaAba) {
           const o = el('option', { value: v }, STATUS_LABEL[v]);
-          if (state.filtroStatus === v) o.selected = true;
+          if (state[fStatus] === v) o.selected = true;
           s.append(o);
         }
         return s;
@@ -349,21 +395,26 @@
     const envolta = el('div', { class: 'tabela-envolta' });
     const cartao = el('div', { class: 'cartao' },
       el('div', { class: 'linha-topo' },
-        el('h2', null, 'Chamados em andamento'),
-        el('a', { href: '#/novo' }, el('button', { class: 'btn btn-primario' }, 'Novo chamado'))),
+        el('h2', null, ehCompra ? 'Chamados de compra em andamento' : 'Chamados de viagem em andamento'),
+        el('a', { href: ehCompra ? '#/novo/compra' : '#/novo' },
+          el('button', { class: 'btn btn-primario' }, ehCompra ? 'Nova compra' : 'Nova viagem'))),
       el('p', { class: 'mudo' }, 'Chamados finalizados e cancelados ficam na aba Histórico.'),
       filtros, envolta);
     cont.append(cartao);
 
     function desenhar() {
-      const ativos = state.chamados.filter((c) => STATUS_ATIVOS.includes(c.status));
-      const lista = filtrarChamados(ativos, state.filtroBusca, state.filtroStatus);
+      const ativos = state.chamados.filter((c) =>
+        STATUS_ATIVOS.includes(c.status) && ((c.tipo || 'viagem') === tipoAba));
+      const lista = filtrarChamados(ativos, state[fBusca], state[fStatus]);
       envolta.innerHTML = '';
       if (!lista.length) {
-        envolta.append(el('div', { class: 'vazio' }, 'Nenhum chamado em andamento. Clique em "Novo chamado" para abrir o primeiro.'));
+        envolta.append(el('div', { class: 'vazio' },
+          ehCompra
+            ? 'Nenhuma compra em andamento. Clique em "Nova compra" para abrir a primeira.'
+            : 'Nenhuma viagem em andamento. Clique em "Nova viagem" para abrir a primeira.'));
         return;
       }
-      envolta.append(tabelaChamados(lista));
+      envolta.append(tabelaChamados(lista, tipoAba));
     }
     desenhar();
   }
@@ -407,7 +458,7 @@
         envolta.append(el('div', { class: 'vazio' }, 'Nenhum chamado finalizado ou cancelado ainda.'));
         return;
       }
-      envolta.append(tabelaChamados(lista));
+      envolta.append(tabelaChamados(lista, 'misto'));
     }
     desenhar();
   }
@@ -621,9 +672,9 @@
   }
 
   // ------------------------------------------------------------------ novo chamado
-  function renderNovo(cont) {
+  function renderNovo(cont, tipoInicial) {
     cont.innerHTML = '';
-    let tipo = 'viagem';
+    let tipo = tipoInicial === 'compra' ? 'compra' : 'viagem';
 
     // ---- valor + prévia 70/30 (só para viagem) ----
     const previa = el('div', { class: 'previa-valores oculto' });
@@ -701,6 +752,7 @@
       atualizarPrevia();
     }
     btnViagem.addEventListener('click', () => definirTipo('viagem'));
+    definirTipo(tipo); // sincroniza seções e botões com o tipo inicial da aba
     btnCompra.addEventListener('click', () => definirTipo('compra'));
 
     const btn = el('button', { class: 'btn btn-primario', type: 'submit' }, 'Abrir chamado');
@@ -755,7 +807,7 @@
       el('h3', { class: 'form-secao' }, 'Observações'),
       obs,
       el('div', { class: 'acoes-status' }, btn,
-        el('button', { class: 'btn btn-suave', type: 'button', onclick: () => { location.hash = '#/chamados'; } }, 'Cancelar')));
+        el('button', { class: 'btn btn-suave', type: 'button', onclick: () => { location.hash = tipo === 'compra' ? '#/compras' : '#/viagens'; } }, 'Cancelar')));
 
     cont.append(el('div', { class: 'cartao' },
       el('div', { class: 'linha-topo' }, el('h2', null, 'Novo chamado')),
