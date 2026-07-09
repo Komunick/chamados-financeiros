@@ -253,6 +253,7 @@
       ['#/compras', 'Compras'],
       ['#/novo', 'Novo chamado'],
       ['#/historico', 'Histórico'],
+      ['#/telefones', 'Telefones'],
     ];
     if (ehFinanceiro()) links.push(['#/relatorios', 'Relatórios']);
     if (ehFinanceiro()) links.push(['#/notificacoes', 'Notificações']);
@@ -278,6 +279,7 @@
       if (rota === '/novo' || rota === '/novo/compra') return renderNovo(cont, rota === '/novo/compra' ? 'compra' : 'viagem');
       if (rota === '/compras') return await renderLista(cont, 'compra');
       if (rota === '/historico') return await renderHistorico(cont);
+      if (rota === '/telefones') return await renderTelefones(cont);
       if (rota === '/relatorios' && ehFinanceiro()) return await renderRelatorios(cont);
       if (rota === '/notificacoes' && ehFinanceiro()) return await renderNotificacoes(cont);
       if (rota === '/auditoria' && ehFinanceiro()) return await renderAuditoria(cont);
@@ -463,6 +465,60 @@
         return;
       }
       envolta.append(tabelaChamados(lista, 'misto'));
+    }
+    desenhar();
+  }
+
+  // ------------------------------------------------------------------ telefones dos condutores
+  async function renderTelefones(cont) {
+    if (!state.cadastro) {
+      try { state.cadastro = await api('GET', '/api/cadastro'); }
+      catch (_) { state.cadastro = { veiculos: [], motoristas: [] }; }
+    }
+    const motoristas = state.cadastro.motoristas || [];
+    cont.innerHTML = '';
+
+    let busca = '';
+    const filtros = el('div', { class: 'filtros' },
+      el('input', {
+        type: 'search', placeholder: 'Buscar por nome, CPF ou telefone…',
+        oninput: (e) => { busca = e.target.value; desenhar(); },
+      }));
+    const resumo = el('p', { class: 'mudo' });
+    const envolta = el('div', { class: 'tabela-envolta' });
+    cont.append(el('div', { class: 'cartao' },
+      el('div', { class: 'linha-topo' }, el('h2', null, 'Telefones dos condutores')),
+      resumo, filtros, envolta));
+
+    function desenhar() {
+      const b = busca.trim().toLowerCase();
+      const lista = motoristas.filter((m) => !b ||
+        [m.nome, m.cpf, m.telefone, m.vinculo].join(' ').toLowerCase().includes(b));
+      resumo.textContent = lista.length + ' de ' + motoristas.length +
+        ' condutores do cadastro da programação.';
+      envolta.innerHTML = '';
+      if (!lista.length) {
+        envolta.append(el('div', { class: 'vazio' }, motoristas.length
+          ? 'Nenhum condutor encontrado com essa busca.'
+          : 'Cadastro vazio — rode o IMPORTAR-CADASTRO.bat para importar a programação.'));
+        return;
+      }
+      const tabela = el('table', { class: 'lista' },
+        el('thead', null, el('tr', null,
+          ...['Condutor', 'Telefone', 'CPF', 'Vínculo', 'Situação'].map((h) => el('th', null, h)))));
+      const tbody = el('tbody');
+      for (const m of lista) {
+        tbody.append(el('tr', null,
+          el('td', null, m.nome),
+          el('td', null, m.telefone
+            ? el('a', { href: 'tel:+55' + m.telefone.replace(/\D/g, '') }, m.telefone)
+            : el('span', { class: 'mudo' }, 'sem telefone')),
+          el('td', null, m.cpf || '—'),
+          el('td', null, m.vinculo || '—'),
+          el('td', null, m.status || '—')));
+      }
+      tabela.append(tbody);
+      envolta.append(tabela);
     }
     desenhar();
   }
@@ -781,6 +837,15 @@
       if (m.status && m.status !== 'APROVADO') {
         toast('Situação do motorista na programação: ' + m.status + '. Confira antes de abrir o chamado.', 'erro');
       }
+    });
+    // Nome digitado por extenso (sem clicar na sugestão) também preenche
+    // CPF e telefone, sem sobrescrever o que o usuário já digitou.
+    cNome.input.addEventListener('change', () => {
+      const nome = cNome.input.value.trim().toUpperCase();
+      const m = cadastro.motoristas.find((x) => x.nome.toUpperCase() === nome);
+      if (!m) return;
+      if (m.cpf && !cDoc.input.value) cDoc.input.value = m.cpf;
+      if (m.telefone && !cTel.input.value) cTel.input.value = m.telefone;
     });
     const cCnh = campo('CNH (só números)', { placeholder: '11 números da CNH', inputmode: 'numeric', maxlength: '11' });
     aplicarMascara(cCnh.input, (v) => soDigitos(v).slice(0, 11));
