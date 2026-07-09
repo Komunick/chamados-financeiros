@@ -39,22 +39,28 @@
       </form>
     </div>
 
-    <!-- Aplicação -->
+    <!-- Aplicação: barra lateral (navegação vertical) + conteúdo -->
     <div id="tela-app" class="oculto">
-      <header class="topo">
-        <div class="topo-titulo">
-          <img class="topo-logo" src="logo.png" alt="Brazil Transports" />
-          <strong>Chamados Financeiros</strong>
-        </div>
-        <nav class="topo-nav" id="topo-nav"></nav>
-        <div class="topo-usuario">
-          <span id="sino" class="sino oculto" title="Notificações"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span id="sino-badge" class="sino-badge oculto"></span></span>
-          <span id="usuario-nome" class="mudo"></span>
-          <button id="btn-tema" class="btn btn-suave btn-tema" title="Alternar modo claro/escuro">🌙</button>
-          <button id="btn-sair" class="btn btn-suave">Sair</button>
-        </div>
-      </header>
-      <main id="conteudo" class="conteudo"></main>
+      <div class="app-grade">
+        <aside class="lateral">
+          <div class="lateral-marca">
+            <img class="topo-logo" src="logo-white.png" alt="Brazil Transports" />
+            <strong>Chamados Financeiros</strong>
+          </div>
+          <nav class="topo-nav" id="topo-nav"></nav>
+          <div class="lateral-rodape">
+            <div class="lateral-usuario">
+              <span id="sino" class="sino oculto" title="Notificações"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span id="sino-badge" class="sino-badge oculto"></span></span>
+              <span id="usuario-nome" class="mudo"></span>
+            </div>
+            <div class="lateral-acoes">
+              <button id="btn-tema" class="btn btn-tema" title="Alternar modo claro/escuro">🌙</button>
+              <button id="btn-sair" class="btn">Sair</button>
+            </div>
+          </div>
+        </aside>
+        <main id="conteudo" class="conteudo"></main>
+      </div>
     </div>
 
     <!-- Avisos flutuantes -->

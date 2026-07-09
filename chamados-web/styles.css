@@ -67,8 +67,7 @@
 [data-tema="escuro"] .toast.toast-erro { color: #16201a; border-left-color: #16201a; }
 [data-tema="escuro"] .toast.toast-notif { color: #f7f6f1; }
 [data-tema="escuro"] .anexo-mini .remover { color: #16201a; }
-/* Logomarca branca sobre fundos escuros. */
-[data-tema="escuro"] .topo-logo,
+/* Logomarca branca sobre fundos escuros (a da barra lateral ja e branca). */
 [data-tema="escuro"] .login-logo { content: url("logo-white.png"); }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
@@ -120,44 +119,85 @@ h1, h2, h3 { font-family: var(--serifa); font-weight: 700; letter-spacing: -.01e
 .login-cartao label { display: block; text-align: left; margin-bottom: 14px; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
 .login-cartao input { margin-top: 5px; }
 
-/* ---------- topo (cabeçalho de jornal) ---------- */
-.topo {
-  background: var(--cartao);
+/* ---------- barra lateral (navegação vertical) ----------
+   Verde profundo da marca nos dois temas, com o amarelo marcando a aba
+   ativa — mesma linguagem do Controle Patrimonial. */
+.app-grade { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+.lateral {
+  background: var(--primario-escuro);
   border-top: 4px solid var(--amarelo-marca);
-  border-bottom: 1px solid var(--tinta);
   display: flex;
-  align-items: center;
-  gap: 24px;
-  padding: 12px 24px;
+  flex-direction: column;
+  padding: 16px 12px;
   position: sticky;
   top: 0;
+  height: 100vh;
   z-index: 20;
 }
-.topo-titulo { display: flex; align-items: center; gap: 12px; white-space: nowrap; color: var(--primario); }
-.topo-titulo strong { font-family: var(--serifa); font-size: 17px; letter-spacing: -.01em; }
-.topo-logo { height: 32px; width: auto; display: block; }
-.topo-nav { display: flex; gap: 2px; flex: 1; flex-wrap: wrap; }
+.lateral-marca { padding: 4px 8px 16px; color: #F4F1E8; }
+.lateral-marca strong {
+  display: block; margin-top: 10px;
+  font-family: var(--serifa); font-size: 16px; letter-spacing: -.01em;
+}
+.topo-logo { height: 34px; width: auto; display: block; }
+.topo-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow-y: auto; }
 .topo-nav a {
   text-decoration: none;
-  color: var(--mudo);
-  padding: 8px 12px 6px;
+  color: #C9DACD;
+  padding: 10px 12px;
   font-weight: 600;
   font-size: 12.5px;
   text-transform: uppercase;
   letter-spacing: .08em;
-  border-bottom: 2px solid transparent;
+  border-left: 3px solid transparent;
+  border-radius: 2px;
 }
-.topo-nav a:hover { color: var(--tinta); border-bottom-color: var(--filete); }
-.topo-nav a.ativo { color: var(--primario); border-bottom-color: var(--primario); }
-.topo-usuario { display: flex; align-items: center; gap: 14px; white-space: nowrap; font-size: 13px; }
-.sino { cursor: pointer; position: relative; color: var(--mudo); display: inline-flex; align-items: center; }
-.sino:hover { color: var(--primario); }
+.topo-nav a:hover { color: #fff; background: rgba(255, 255, 255, .07); }
+.topo-nav a.ativo {
+  color: #fff;
+  border-left-color: var(--amarelo-marca);
+  background: rgba(249, 176, 49, .13);
+}
+.lateral-rodape {
+  border-top: 1px solid rgba(255, 255, 255, .14);
+  padding-top: 12px; margin-top: 10px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.lateral-usuario { display: flex; align-items: center; gap: 10px; font-size: 13px; min-width: 0; }
+.lateral-usuario .mudo { color: #C9DACD; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lateral-acoes { display: flex; gap: 8px; }
+.lateral-acoes .btn {
+  flex: 1;
+  background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .18);
+  color: #E8F0EA;
+}
+.lateral-acoes .btn:hover { background: rgba(255, 255, 255, .13); border-color: rgba(255, 255, 255, .34); }
+.lateral-acoes .btn-tema { flex: 0 0 auto; }
+.sino { cursor: pointer; position: relative; color: #C9DACD; display: inline-flex; align-items: center; }
+.sino:hover { color: var(--amarelo-marca); }
 .sino svg { display: block; }
 .sino-badge {
   position: absolute; top: -7px; right: -9px;
   background: var(--vermelho); color: #fff;
   font-size: 10px; font-weight: 700;
   border-radius: 999px; padding: 1px 5px;
+}
+
+/* Telas estreitas (celular): a barra vira um topo horizontal compacto. */
+@media (max-width: 860px) {
+  .app-grade { grid-template-columns: 1fr; }
+  .lateral {
+    position: static; height: auto;
+    flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px 14px;
+    padding: 10px 14px;
+  }
+  .lateral-marca { padding: 0; display: flex; align-items: center; gap: 10px; }
+  .lateral-marca strong { margin-top: 0; font-size: 14px; }
+  .topo-logo { height: 26px; }
+  .topo-nav { flex-direction: row; flex-wrap: wrap; overflow: visible; }
+  .topo-nav a { padding: 7px 10px; border-left: none; border-bottom: 3px solid transparent; }
+  .topo-nav a.ativo { border-left-color: transparent; border-bottom-color: var(--amarelo-marca); }
+  .lateral-rodape { border-top: none; padding-top: 0; margin: 0 0 0 auto; flex-direction: row; align-items: center; }
 }
 
 /* ---------- estrutura ---------- */
@@ -442,7 +482,6 @@ label.com-sugestoes { position: relative; }
 .sugestao .mudo { font-size: .85em; }
 
 @media (max-width: 640px) {
-  .topo { flex-wrap: wrap; }
   .conteudo { padding: 16px 12px 60px; }
   table.lista th, table.lista td { padding: 8px; }
 }
