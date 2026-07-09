@@ -780,16 +780,34 @@ rota('GET', '/api/auditoria', ['financeiro', 'admin'], (ctx) => {
 });
 
 // ---- cadastro de frota e motoristas -------------------------------------------
-// Gerado pela ferramenta importar-cadastro.py (planilha FROTA CERTADOC +
-// CSV da programação de motoristas). Alimenta o autocompletar do "Novo
-// chamado". Somente leitura; recarrega sozinho quando o arquivo muda.
-let cadastroCache = { mtime: 0, dados: null };
+// Gerado pela ferramenta importar-cadastro.py (planilha da programação +
+// frota CertaDoc). Alimenta o autocompletar do "Novo chamado" e a aba
+// Telefones; recarrega sozinho quando os arquivos mudam. Correções manuais
+// de CPF/telefone ficam em cadastro-correcoes.json — arquivo separado para
+// que uma reimportação da planilha não desfaça o que foi corrigido à mão.
+let cadastroCache = { mtime: 0, mtimeCor: 0, dados: null };
+function arqCorrecoes() { return path.join(d.DATA_DIR, 'cadastro-correcoes.json'); }
+function lerCorrecoes() {
+  try { return JSON.parse(fs.readFileSync(arqCorrecoes(), 'utf8')); }
+  catch (_) { return { motoristas: {} }; }
+}
 function lerCadastro() {
   const arq = path.join(d.DATA_DIR, 'cadastro.json');
   try {
     const st = fs.statSync(arq);
-    if (!cadastroCache.dados || st.mtimeMs !== cadastroCache.mtime) {
-      cadastroCache = { mtime: st.mtimeMs, dados: JSON.parse(fs.readFileSync(arq, 'utf8')) };
+    let stCor = 0;
+    try { stCor = fs.statSync(arqCorrecoes()).mtimeMs; } catch (_) { /* ainda sem correções */ }
+    if (!cadastroCache.dados || st.mtimeMs !== cadastroCache.mtime || stCor !== cadastroCache.mtimeCor) {
+      const dados = JSON.parse(fs.readFileSync(arq, 'utf8'));
+      const cor = lerCorrecoes().motoristas || {};
+      for (const m of dados.motoristas || []) {
+        const c = cor[m.nome.trim().toUpperCase()];
+        if (c) {
+          if (typeof c.cpf === 'string') m.cpf = c.cpf;
+          if (typeof c.telefone === 'string') m.telefone = c.telefone;
+        }
+      }
+      cadastroCache = { mtime: st.mtimeMs, mtimeCor: stCor, dados };
     }
     return cadastroCache.dados;
   } catch (_) {
@@ -798,6 +816,39 @@ function lerCadastro() {
 }
 rota('GET', '/api/cadastro', null, (ctx) => {
   sendJson(ctx.res, 200, lerCadastro());
+});
+
+// Correção manual do CPF/telefone de um condutor (qualquer usuário logado):
+// usada pelo "Novo chamado" e pela aba Telefones quando o dado importado da
+// planilha está errado. Fica registrada na auditoria.
+rota('POST', '/api/cadastro/motorista', null, (ctx) => {
+  const nome = txt(ctx.body.nome, 120).trim();
+  const m = (lerCadastro().motoristas || [])
+    .find((x) => x.nome.trim().toUpperCase() === nome.toUpperCase());
+  if (!m) return erro(ctx.res, 404, 'Condutor não encontrado no cadastro.');
+  const cpf = txt(ctx.body.cpf, 14).trim();
+  const telefone = txt(ctx.body.telefone, 15).trim();
+  if (cpf && !/^\d{3}\.\d{3}\.\d{3}-\d{2}$/.test(cpf)) {
+    return erro(ctx.res, 400, 'CPF inválido: use o formato 000.000.000-00.');
+  }
+  if (telefone && !/^\(\d{2}\) \d{4,5}-\d{4}$/.test(telefone)) {
+    return erro(ctx.res, 400, 'Telefone inválido: use o formato (00) 90000-0000.');
+  }
+  const correcoes = lerCorrecoes();
+  if (!correcoes.motoristas) correcoes.motoristas = {};
+  correcoes.motoristas[m.nome.trim().toUpperCase()] = {
+    cpf, telefone,
+    por: ctx.usuario.nome,
+    em: d.agora(),
+  };
+  const tmp = arqCorrecoes() + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(correcoes, null, 1));
+  fs.renameSync(tmp, arqCorrecoes());
+  cadastroCache.dados = null; // re-mescla as correções na próxima leitura
+  auditar(ctx.usuario, 'Corrigiu o cadastro do condutor ' + m.nome,
+    'CPF: ' + (cpf || '(vazio)') + ' · Telefone: ' + (telefone || '(vazio)'), ctx.ip);
+  d.flush();
+  sendJson(ctx.res, 200, { motorista: Object.assign({}, m, { cpf, telefone }) });
 });
 
 // ---- backup ------------------------------------------------------------------

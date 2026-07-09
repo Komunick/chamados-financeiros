@@ -505,20 +505,54 @@
       }
       const tabela = el('table', { class: 'lista' },
         el('thead', null, el('tr', null,
-          ...['Condutor', 'Telefone', 'CPF', 'Vínculo', 'Situação'].map((h) => el('th', null, h)))));
+          ...['Condutor', 'Telefone', 'CPF', 'Vínculo', 'Situação', ''].map((h) => el('th', null, h)))));
       const tbody = el('tbody');
       for (const m of lista) {
-        tbody.append(el('tr', null,
+        const tr = el('tr', null,
           el('td', null, m.nome),
           el('td', null, m.telefone
             ? el('a', { href: 'tel:+55' + m.telefone.replace(/\D/g, '') }, m.telefone)
             : el('span', { class: 'mudo' }, 'sem telefone')),
           el('td', null, m.cpf || '—'),
           el('td', null, m.vinculo || '—'),
-          el('td', null, m.status || '—')));
+          el('td', null, m.status || '—'));
+        const btnEd = el('button', { class: 'btn btn-suave btn-mini', type: 'button' }, 'Corrigir');
+        btnEd.addEventListener('click', () => editar(tr, m));
+        tr.append(el('td', null, btnEd));
+        tbody.append(tr);
       }
       tabela.append(tbody);
       envolta.append(tabela);
+    }
+
+    // Troca a linha por campos editáveis de CPF/telefone; salvar grava a
+    // correção no sistema (vale também para o autocompletar do Novo chamado).
+    function editar(tr, m) {
+      tr.innerHTML = '';
+      const iTel = el('input', { type: 'text', value: m.telefone || '', inputmode: 'numeric', maxlength: '15', placeholder: '(00) 90000-0000' });
+      aplicarMascara(iTel, mascaraTelefone);
+      const iCpf = el('input', { type: 'text', value: m.cpf || '', inputmode: 'numeric', maxlength: '14', placeholder: '000.000.000-00' });
+      aplicarMascara(iCpf, mascaraCpf);
+      const bSalvar = el('button', { class: 'btn btn-primario btn-mini', type: 'button' }, 'Salvar');
+      const bCancelar = el('button', { class: 'btn btn-suave btn-mini', type: 'button' }, 'Cancelar');
+      bSalvar.addEventListener('click', async () => {
+        try {
+          const r = await api('POST', '/api/cadastro/motorista',
+            { nome: m.nome, cpf: iCpf.value.trim(), telefone: iTel.value.trim() });
+          m.cpf = r.motorista.cpf;
+          m.telefone = r.motorista.telefone;
+          toast('Cadastro de ' + m.nome + ' atualizado.');
+          desenhar();
+        } catch (e) { toast(e.message, 'erro'); }
+      });
+      bCancelar.addEventListener('click', () => desenhar());
+      tr.append(
+        el('td', null, m.nome),
+        el('td', null, iTel),
+        el('td', null, iCpf),
+        el('td', null, m.vinculo || '—'),
+        el('td', null, m.status || '—'),
+        el('td', null, bSalvar, ' ', bCancelar));
     }
     desenhar();
   }
@@ -834,6 +868,7 @@
       // Escolheu um motorista do cadastro: CPF e telefone entram sozinhos.
       if (m.cpf) cDoc.input.value = m.cpf;
       if (m.telefone) cTel.input.value = m.telefone;
+      verificarCorrecao();
       if (m.status && m.status !== 'APROVADO') {
         toast('Situação do motorista na programação: ' + m.status + '. Confira antes de abrir o chamado.', 'erro');
       }
@@ -846,11 +881,43 @@
       if (!m) return;
       if (m.cpf && !cDoc.input.value) cDoc.input.value = m.cpf;
       if (m.telefone && !cTel.input.value) cTel.input.value = m.telefone;
+      verificarCorrecao();
     });
     const cCnh = campo('CNH (só números)', { placeholder: '11 números da CNH', inputmode: 'numeric', maxlength: '11' });
     aplicarMascara(cCnh.input, (v) => soDigitos(v).slice(0, 11));
     const cTel = campo('Telefone', { placeholder: '(00) 90000-0000', inputmode: 'numeric', maxlength: '15' });
     aplicarMascara(cTel.input, mascaraTelefone);
+
+    // CPF e telefone podem ser corrigidos à vontade antes de abrir o chamado;
+    // se ficarem diferentes do cadastro, este botão salva a correção no
+    // sistema para as próximas vezes (e para a aba Telefones).
+    const btnCorrigir = el('button', { class: 'btn btn-suave btn-mini oculto', type: 'button' },
+      'CPF/telefone diferem do cadastro — salvar correção no sistema');
+    const motoristaAtual = () => {
+      const nome = cNome.input.value.trim().toUpperCase();
+      return cadastro.motoristas.find((x) => x.nome.toUpperCase() === nome) || null;
+    };
+    const verificarCorrecao = () => {
+      const m = motoristaAtual();
+      const difere = m && (soDigitos(cDoc.input.value) !== soDigitos(m.cpf || '') ||
+        soDigitos(cTel.input.value) !== soDigitos(m.telefone || ''));
+      btnCorrigir.classList.toggle('oculto', !difere);
+    };
+    for (const i of [cNome.input, cDoc.input, cTel.input]) {
+      i.addEventListener('input', verificarCorrecao);
+    }
+    btnCorrigir.addEventListener('click', async () => {
+      const m = motoristaAtual();
+      if (!m) return;
+      try {
+        const r = await api('POST', '/api/cadastro/motorista',
+          { nome: m.nome, cpf: cDoc.input.value.trim(), telefone: cTel.input.value.trim() });
+        m.cpf = r.motorista.cpf;
+        m.telefone = r.motorista.telefone;
+        verificarCorrecao();
+        toast('Cadastro de ' + m.nome + ' atualizado no sistema.');
+      } catch (e) { toast(e.message, 'erro'); }
+    });
 
     // ---- campos de compra ----
     const compraDesc = campo('O que será comprado? *', { placeholder: 'Ex.: 4 pneus 295/80 R22.5' });
@@ -864,7 +931,8 @@
       el('h3', { class: 'form-secao' }, 'Viagem'),
       el('div', { class: 'form-grade' }, dataViagem.rotulo, rotaViagem.rotulo),
       el('h3', { class: 'form-secao' }, 'Dados do condutor'),
-      el('div', { class: 'form-grade' }, cNome.rotulo, cDoc.rotulo, cCnh.rotulo, cTel.rotulo));
+      el('div', { class: 'form-grade' }, cNome.rotulo, cDoc.rotulo, cCnh.rotulo, cTel.rotulo),
+      btnCorrigir);
 
     const secCompra = el('div', { class: 'oculto' },
       el('h3', { class: 'form-secao' }, 'Dados da compra'),
