@@ -380,7 +380,7 @@ label.com-sugestoes { position: relative; }
   position: absolute; top: 100%; left: 0; right: 0; z-index: 40;
   background: var(--cartao); border: 1px solid var(--borda); border-radius: var(--raio);
   box-shadow: 0 6px 16px rgba(28, 43, 34, .14);
-  max-height: 240px; overflow-y: auto;
+  max-height: 320px; overflow-y: auto;
 }
 .sugestao {
   display: block; width: 100%; text-align: left; padding: 8px 10px;

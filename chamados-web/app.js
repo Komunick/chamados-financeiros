@@ -701,10 +701,12 @@
         caixa.append(b);
       });
       caixa.classList.toggle('oculto', opcoes.length === 0);
+      if (ativo >= 0 && caixa.children[ativo]) caixa.children[ativo].scrollIntoView({ block: 'nearest' });
     };
-    const atualizar = () => { opcoes = buscar(input.value).slice(0, 8); ativo = -1; desenhar(); };
-    input.addEventListener('input', atualizar);
-    input.addEventListener('focus', atualizar);
+    const atualizar = (texto) => { opcoes = buscar(texto); ativo = -1; desenhar(); };
+    input.addEventListener('input', () => atualizar(input.value));
+    // Ao entrar no campo, abre a lista completa; digitando, filtra.
+    input.addEventListener('focus', () => atualizar(''));
     input.addEventListener('blur', fechar);
     input.addEventListener('keydown', (e) => {
       if (caixa.classList.contains('oculto')) return;
@@ -769,9 +771,8 @@
     aplicarMascara(cDoc.input, mascaraCpf);
     autocompletar(cNome.input, (q) => {
       const trecho = q.trim().toUpperCase();
-      if (trecho.length < 2) return [];
       return cadastro.motoristas
-        .filter((m) => m.nome.toUpperCase().includes(trecho))
+        .filter((m) => !trecho || m.nome.toUpperCase().includes(trecho))
         .map((m) => ({ valor: m.nome, detalhe: m.cpf, item: m }));
     }, (m) => {
       // Escolheu um motorista do cadastro: CPF e telefone entram sozinhos.
