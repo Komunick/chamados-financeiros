@@ -278,10 +278,20 @@ function loginBloqueado(ip) {
 function registrarFalhaLogin(ip) {
   const t = tentativas.get(ip) || { falhas: 0, bloqueadoAte: 0 };
   t.falhas += 1;
+  t.visto = Date.now();
   if (t.falhas >= 5) { t.bloqueadoAte = Date.now() + 60 * 1000; t.falhas = 0; }
   tentativas.set(ip, t);
+  if (tentativas.size > 500) pruneTentativas();
 }
 function limparFalhasLogin(ip) { tentativas.delete(ip); }
+// Evita o mapa crescer sem limite: descarta IPs inativos há mais de 1h e sem
+// bloqueio ativo.
+function pruneTentativas() {
+  const limite = Date.now() - 60 * 60 * 1000;
+  for (const [ip, t] of tentativas) {
+    if ((t.visto || 0) < limite && (!t.bloqueadoAte || t.bloqueadoAte < Date.now())) tentativas.delete(ip);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Rotas da API.
@@ -771,6 +781,10 @@ rota('GET', '/api/auditoria', ['financeiro', 'admin'], (ctx) => {
 
 // ---- backup ------------------------------------------------------------------
 rota('GET', '/api/export', ['admin'], (ctx) => {
+  // Exporta a base completa (inclui hashes de senha e sessões): registra na
+  // auditoria quem baixou e quando.
+  auditar(ctx.usuario, 'Exportou a base completa (backup)', null, ctx.ip);
+  d.flush();
   sendJson(ctx.res, 200, d.db);
 });
 
@@ -846,6 +860,13 @@ function serveStatic(req, res) {
   // Não expor o código do servidor pela web.
   const blocked = [path.join(ROOT, 'server')];
   if (blocked.some((b) => filePath === b || filePath.startsWith(b + path.sep))) {
+    return send(res, 403, 'Forbidden');
+  }
+  // Não servir arquivos sensíveis/ocultos mesmo dentro da pasta web
+  // (logs, scripts de automação, ocultos como .git, backups .bak).
+  const base = path.basename(filePath);
+  const EXT_BLOQUEADAS = ['.log', '.bat', '.vbs', '.ps1', '.bak'];
+  if (base.startsWith('.') || EXT_BLOQUEADAS.includes(path.extname(filePath).toLowerCase())) {
     return send(res, 403, 'Forbidden');
   }
   fs.readFile(filePath, (err, data) => {

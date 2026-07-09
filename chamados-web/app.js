@@ -54,14 +54,18 @@
     const p = String(s).split('-');
     return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : s;
   };
-  // "1.500,00" / "1500,5" / "1500" → centavos (int) ou null
+  // "1.500,00" / "1500,5" / "1500" → centavos (int) ou null.
+  // Cálculo em inteiros (sem multiplicar float por 100) para evitar qualquer
+  // erro de precisão em valores como 19,99.
   function parseMoeda(str) {
     let s = String(str || '').trim().replace(/[R$\s]/g, '');
     if (!s) return null;
-    s = s.replace(/\./g, '').replace(',', '.');
-    const n = Number(s);
-    if (!Number.isFinite(n) || n <= 0) return null;
-    return Math.round(n * 100);
+    s = s.replace(/\./g, '').replace(',', '.'); // pt-BR → decimal com ponto
+    if (!/^\d+(\.\d+)?$/.test(s)) return null;
+    const [inteiro, frac = ''] = s.split('.');
+    const centavos = Number(inteiro) * 100 + Number((frac + '00').slice(0, 2));
+    if (!Number.isFinite(centavos) || centavos <= 0) return null;
+    return centavos;
   }
   const STATUS_LABEL = {
     aberto: 'Aberto',

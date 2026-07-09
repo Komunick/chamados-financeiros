@@ -75,8 +75,13 @@ try {
 } catch (e) { /* sem arquivo ainda */ }
 
 function salvarAvisadas() {
-  try { fs.writeFileSync(AVISADAS_FILE, JSON.stringify([...avisadas])); }
-  catch (e) { log('Falha ao salvar avisadas.json: ' + e.message); }
+  // Gravação atômica (tmp + rename) para o arquivo nunca ficar pela metade se
+  // o processo cair no meio da escrita.
+  try {
+    const tmp = AVISADAS_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify([...avisadas]));
+    fs.renameSync(tmp, AVISADAS_FILE);
+  } catch (e) { log('Falha ao salvar avisadas.json: ' + e.message); }
 }
 
 // ---------------------------------------------------------------------------

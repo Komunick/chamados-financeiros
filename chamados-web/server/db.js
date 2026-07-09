@@ -99,6 +99,12 @@ for (const c of db.chamados) {
 // ---------------------------------------------------------------------------
 // Persistência atômica + snapshots.
 // ---------------------------------------------------------------------------
+// Pequena espera SÍNCRONA (sem depender de libs) para o retry do rename.
+function esperaCurta(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+  catch (_) { /* SharedArrayBuffer indisponível: segue sem esperar */ }
+}
+
 function flush() {
   const tmp = DATA_FILE + '.tmp';
   const fd = fs.openSync(tmp, 'w');
@@ -108,7 +114,22 @@ function flush() {
   } finally {
     fs.closeSync(fd);
   }
-  fs.renameSync(tmp, DATA_FILE);
+  // rename é a troca ATÔMICA correta: se o processo cair antes dela, o arquivo
+  // de dados continua íntegro (o antigo, nunca um meio-termo). No Windows, o
+  // rename sobre um arquivo existente pode falhar de forma transitória
+  // (EPERM/EACCES/EBUSY) quando antivírus/backup está lendo o destino — então
+  // tentamos algumas vezes antes de desistir.
+  let ultimoErro;
+  for (let tentativa = 0; tentativa < 10; tentativa++) {
+    try { fs.renameSync(tmp, DATA_FILE); return; }
+    catch (e) {
+      ultimoErro = e;
+      if (!['EPERM', 'EACCES', 'EBUSY', 'EEXIST'].includes(e.code)) throw e;
+      esperaCurta(20);
+    }
+  }
+  try { fs.unlinkSync(tmp); } catch (_) { /* ignore */ }
+  throw ultimoErro;
 }
 
 function rotateBackups(keep) {
@@ -120,7 +141,9 @@ function rotateBackups(keep) {
     for (const old of files.slice(keep || 40)) {
       try { fs.unlinkSync(path.join(BACKUP_DIR, old.f)); } catch (_) { /* ignore */ }
     }
-  } catch (_) { /* ignore */ }
+  } catch (e) {
+    console.warn('[Chamados] não foi possível limpar backups antigos em ' + BACKUP_DIR + ': ' + (e && e.message));
+  }
 }
 
 function snapshot(reason) {
