@@ -4,6 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Brazil Transports — Chamados Financeiros</title>
+  <script>
+    // Aplica o tema salvo ANTES da primeira pintura (evita o "flash" claro).
+    // Sem preferência salva, segue o modo do sistema operacional.
+    (function () {
+      var tema = localStorage.getItem('chamados.tema');
+      if (tema !== 'escuro' && tema !== 'claro') {
+        tema = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          ? 'escuro' : 'claro';
+      }
+      document.documentElement.dataset.tema = tema;
+    })();
+  </script>
   <link rel="stylesheet" href="styles.css" />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
 </head>
@@ -23,6 +35,7 @@
         </label>
         <button type="submit" class="btn btn-primario btn-largo">Entrar</button>
         <p id="login-erro" class="erro oculto"></p>
+        <button type="button" id="btn-tema-login" class="tema-link">Usar modo escuro</button>
       </form>
     </div>
 
@@ -37,6 +50,7 @@
         <div class="topo-usuario">
           <span id="sino" class="sino oculto" title="Notificações"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span id="sino-badge" class="sino-badge oculto"></span></span>
           <span id="usuario-nome" class="mudo"></span>
+          <button id="btn-tema" class="btn btn-suave btn-tema" title="Alternar modo claro/escuro">🌙</button>
           <button id="btn-sair" class="btn btn-suave">Sair</button>
         </div>
       </header>

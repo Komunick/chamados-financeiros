@@ -23,10 +23,53 @@
   --laranja-fundo: #f9e9dd;
   --vermelho: #a32222;
   --vermelho-fundo: #f8e5e5;
+  --campo: #ffffff;
   --serifa: Georgia, "Times New Roman", "Palatino Linotype", serif;
   --sombra: 0 1px 2px rgba(28, 43, 34, .05);
   --raio: 3px;
 }
+
+/* ---------- modo escuro ----------
+   Ativado com data-tema="escuro" no <html> (botão no topo / tela de login;
+   preferência salva no navegador, padrão segue o sistema operacional). */
+[data-tema="escuro"] {
+  --fundo: #121613;
+  --cartao: #1a201b;
+  --campo: #232a24;
+  --tinta: #e7ebe6;
+  --mudo: #98a39a;
+  --borda: #2f3831;
+  --filete: #3d473e;
+  --primario: #6fbe93;
+  --primario-escuro: #0d3a20;
+  --primario-fundo: #1e2f25;
+  --amarelo-marca: #f9b031;
+  --amarelo-marca-fundo: #33290f;
+  --verde: #7ed49a;
+  --verde-fundo: #1d3325;
+  --amarelo: #e5bc6a;
+  --amarelo-fundo: #37290f;
+  --laranja: #ef9b6a;
+  --laranja-fundo: #3a2313;
+  --vermelho: #f19999;
+  --vermelho-fundo: #3f1c1c;
+  --sombra: 0 1px 3px rgba(0, 0, 0, .5);
+}
+/* Botões com fundo verde-claro no escuro pedem texto escuro. */
+[data-tema="escuro"] .btn-primario,
+[data-tema="escuro"] .btn-primario:hover,
+[data-tema="escuro"] .btn-verde,
+[data-tema="escuro"] .btn-verde:hover { color: #10231a; }
+[data-tema="escuro"] .btn-primario:hover,
+[data-tema="escuro"] .btn-verde:hover { background: #85d0a6; border-color: #85d0a6; }
+/* Toast usa a tinta como fundo: no escuro a tinta é clara, texto vira escuro. */
+[data-tema="escuro"] .toast { color: #16201a; }
+[data-tema="escuro"] .toast.toast-erro { color: #16201a; border-left-color: #16201a; }
+[data-tema="escuro"] .toast.toast-notif { color: #f7f6f1; }
+[data-tema="escuro"] .anexo-mini .remover { color: #16201a; }
+/* Logomarca branca sobre fundos escuros. */
+[data-tema="escuro"] .topo-logo,
+[data-tema="escuro"] .login-logo { content: url("logo-white.png"); }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body {
@@ -141,7 +184,7 @@ input, select, textarea {
   border: 1px solid var(--borda);
   border-radius: var(--raio);
   font: inherit;
-  background: #fff;
+  background: var(--campo);
   color: var(--tinta);
 }
 input:focus, select:focus, textarea:focus {
@@ -174,7 +217,7 @@ fieldset { border: none; margin: 0; padding: 0; }
 .tipo-btn {
   border: 1px solid var(--borda);
   border-radius: var(--raio);
-  background: #fff;
+  background: var(--campo);
   color: var(--mudo);
   font: inherit;
   font-weight: 600;
@@ -212,10 +255,17 @@ fieldset { border: none; margin: 0; padding: 0; }
 .btn-verde { background: var(--verde); border-color: var(--verde); color: #fff; }
 .btn-verde:hover { border-color: var(--primario-escuro); background: var(--primario-escuro); }
 .btn-suave { background: var(--fundo); border-color: var(--borda); }
-.btn-perigo { background: #fff; border-color: var(--vermelho); color: var(--vermelho); }
+.btn-perigo { background: var(--campo); border-color: var(--vermelho); color: var(--vermelho); }
 .btn-perigo:hover { background: var(--vermelho-fundo); }
 .btn-largo { width: 100%; }
 .btn-mini { padding: 4px 10px; font-size: 12.5px; }
+.btn-tema { padding: 6px 10px; font-size: 15px; line-height: 1; }
+.tema-link {
+  background: none; border: none; cursor: pointer; font: inherit;
+  font-size: 12px; color: var(--mudo); margin-top: 16px;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.tema-link:hover { color: var(--primario); }
 
 /* ---------- lista de chamados ---------- */
 .filtros { display: flex; gap: 10px; margin: 4px 0 18px; flex-wrap: wrap; }
@@ -271,7 +321,7 @@ table.lista td.aud-detalhe { white-space: normal; min-width: 240px; max-width: 4
 
 /* ---------- financeiro (adiantamento/saldo) ---------- */
 .valores { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
-.valor-cartao { border: 1px solid var(--borda); border-top: 3px solid var(--filete); border-radius: var(--raio); padding: 18px; background: #fff; }
+.valor-cartao { border: 1px solid var(--borda); border-top: 3px solid var(--filete); border-radius: var(--raio); padding: 18px; background: var(--campo); }
 .valor-cartao .rotulo { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--mudo); font-weight: 700; }
 .valor-cartao .valor { font-family: var(--serifa); font-size: 30px; font-weight: 700; margin: 8px 0; letter-spacing: -.01em; }
 .valor-cartao.destaque { border-top-color: var(--amarelo-marca); background: var(--primario-fundo); }
@@ -302,7 +352,7 @@ table.lista td.aud-detalhe { white-space: normal; min-width: 240px; max-width: 4
 /* ---------- anexos ---------- */
 .anexos-grupos { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 @media (max-width: 760px) { .anexos-grupos { grid-template-columns: 1fr; } }
-.anexo-grupo { border: 1px dashed var(--filete); border-radius: var(--raio); padding: 16px; background: #fff; }
+.anexo-grupo { border: 1px dashed var(--filete); border-radius: var(--raio); padding: 16px; background: var(--campo); }
 .anexo-grupo h4 { margin: 0 0 8px; font-family: var(--serifa); }
 .anexo-miniaturas { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
 .anexo-mini { position: relative; }
@@ -345,7 +395,7 @@ table.lista td.aud-detalhe { white-space: normal; min-width: 240px; max-width: 4
 .hist .quando { font-size: 12px; color: var(--mudo); }
 
 /* ---------- notificações ---------- */
-.notif { border: 1px solid var(--borda); border-radius: var(--raio); padding: 14px 18px; margin-bottom: 12px; background: #fff; }
+.notif { border: 1px solid var(--borda); border-radius: var(--raio); padding: 14px 18px; margin-bottom: 12px; background: var(--campo); }
 .notif.pendente { border-left: 3px solid var(--amarelo-marca); }
 .notif.ok { opacity: .7; }
 .notif .titulo { font-family: var(--serifa); font-weight: 700; font-size: 16px; }

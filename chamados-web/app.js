@@ -1619,6 +1619,25 @@
   $('#sino').addEventListener('click', () => { location.hash = '#/notificacoes'; });
   window.addEventListener('hashchange', renderRota);
 
+  // ---- tema claro/escuro (padrão segue o sistema; escolha fica salva) ----
+  const temaAtual = () => document.documentElement.dataset.tema === 'escuro' ? 'escuro' : 'claro';
+  function atualizarBotoesTema() {
+    const escuro = temaAtual() === 'escuro';
+    const b = $('#btn-tema');
+    b.textContent = escuro ? '☀️' : '🌙';
+    b.title = escuro ? 'Usar modo claro' : 'Usar modo escuro';
+    $('#btn-tema-login').textContent = escuro ? 'Usar modo claro' : 'Usar modo escuro';
+  }
+  function alternarTema() {
+    const novo = temaAtual() === 'escuro' ? 'claro' : 'escuro';
+    document.documentElement.dataset.tema = novo;
+    localStorage.setItem('chamados.tema', novo);
+    atualizarBotoesTema();
+  }
+  $('#btn-tema').addEventListener('click', alternarTema);
+  $('#btn-tema-login').addEventListener('click', alternarTema);
+  atualizarBotoesTema();
+
   // Atualização de segurança caso o SSE caia: recarrega a visão a cada 60 s
   // (pula formulários em edição para não apagar o que o usuário digitou).
   setInterval(atualizarSeSeguro, 60000);
