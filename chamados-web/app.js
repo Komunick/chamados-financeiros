@@ -859,7 +859,8 @@
   // ------------------------------------------------------------------ novo chamado
   async function renderNovo(cont, tipoInicial) {
     cont.innerHTML = '';
-    let tipo = tipoInicial === 'compra' ? 'compra' : 'viagem';
+    let tipo = tipoInicial === 'compra' ? 'compra'
+      : tipoInicial === 'colaborador' ? 'colaborador' : 'viagem';
 
     // Cadastro de frota/motoristas para o autocompletar (gerado pelo
     // IMPORTAR-CADASTRO.bat; se não existir, os campos ficam livres).
