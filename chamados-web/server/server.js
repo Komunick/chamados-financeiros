@@ -214,6 +214,17 @@ function criarNotificacao(tipo, chamado, titulo, mensagem) {
       fornecedor: chamado.compra ? chamado.compra.fornecedor : '',
       valorTotal: reaisFmt(chamado.valorTotalCent),
       status: chamado.status,
+    } : chamado.tipo === 'colaborador' ? {
+      chamadoId: chamado.id,
+      tipoChamado: 'colaborador',
+      solicitante: chamado.solicitante.nome,
+      colaborador: chamado.colaborador ? chamado.colaborador.nome : '',
+      destino: chamado.colaborador ? chamado.colaborador.destino : '',
+      dataViagem: dataViagemFmt(chamado.dataViagem),
+      valorTotal: chamado.valorTotalCent ? reaisFmt(chamado.valorTotalCent)
+        : (chamado.colaborador && chamado.colaborador.gastos && chamado.colaborador.gastos.previstoCent
+          ? reaisFmt(chamado.colaborador.gastos.previstoCent) + ' (previsto)' : 'a definir'),
+      status: chamado.status,
     } : {
       chamadoId: chamado.id,
       tipoChamado: 'viagem',
@@ -415,13 +426,16 @@ rota('DELETE', '/api/usuarios/:id', ['admin'], (ctx) => {
 // ---- chamados ---------------------------------------------------------------
 function podeVerChamado(usuario, chamado) {
   if (usuario.papel === 'admin' || usuario.papel === 'financeiro') return true;
+  // Solicitante enxerga viagens de colaborador SOMENTE LEITURA (chega nelas
+  // pelos relatórios); a criação/anexos/pagamento seguem restritos.
+  if (chamado.tipo === 'colaborador') return true;
   return chamado.solicitante.id === usuario.id;
 }
 
 rota('GET', '/api/chamados', null, (ctx) => {
   let lista = d.db.chamados;
   if (ctx.usuario.papel === 'solicitante') {
-    lista = lista.filter((c) => c.solicitante.id === ctx.usuario.id);
+    lista = lista.filter((c) => c.solicitante.id === ctx.usuario.id && c.tipo !== 'colaborador');
   }
   // Mais recentes primeiro.
   lista = lista.slice().sort((a, b) => (a.criadoEm < b.criadoEm ? 1 : -1));
@@ -448,7 +462,7 @@ rota('POST', '/api/chamados', null, (ctx) => {
     observacoes: txt(ctx.body.observacoes, 1000),
     valorTotalCent,
     status: 'aberto',
-    anexos: { entrada: [], saida: [] },
+    anexos: { entrada: [], saida: [], romaneio: [] },
     historico: [],
   };
 
@@ -493,6 +507,10 @@ rota('POST', '/api/chamados', null, (ctx) => {
   } else if (tipo === 'colaborador') {
     // Chamado de VIAGEM DE COLABORADOR: pagamento único (reembolso), com
     // comprovantes por categoria (hotel, passagens, alimentação).
+    // Viagens de colaborador são restritas ao financeiro/admin.
+    if (ctx.usuario.papel === 'solicitante') {
+      return erro(ctx.res, 403, 'Viagens de colaborador são abertas pelo financeiro ou pelo administrador.');
+    }
     const vc = ctx.body.colaborador || {};
     const dataIda = normDataViagem(vc.dataIda);
     if (!dataIda) return erro(ctx.res, 400, 'Informe a data de ida da viagem.');
@@ -507,6 +525,27 @@ rota('POST', '/api/chamados', null, (ctx) => {
     };
     if (!colaborador.nome) return erro(ctx.res, 400, 'Informe o nome do colaborador.');
     if (!colaborador.destino) return erro(ctx.res, 400, 'Informe o destino da viagem.');
+    // Gastos previstos por categoria: hotel (valor da estadia), alimentação
+    // (valor POR DIA, multiplicado pelas diárias da viagem) e passagem.
+    const g = vc.gastos || {};
+    const hotelCent = centavos(g.hotelCent) || 0;
+    const alimentacaoDiaCent = centavos(g.alimentacaoDiaCent) || 0;
+    const passagemCent = centavos(g.passagemCent) || 0;
+    let diarias = 1;
+    if (colaborador.dataVolta) {
+      const dias = Math.round((Date.parse(colaborador.dataVolta) - Date.parse(dataIda)) / 86400000);
+      diarias = Math.max(1, dias + 1); // ida e volta contam como diárias
+    }
+    const alimentacaoTotalCent = alimentacaoDiaCent * diarias;
+    const previstoCent = hotelCent + alimentacaoTotalCent + passagemCent;
+    colaborador.gastos = { hotelCent, alimentacaoDiaCent, passagemCent, diarias, alimentacaoTotalCent, previstoCent };
+    const partesGastos = [];
+    if (hotelCent) partesGastos.push('hotel ' + reaisFmt(hotelCent));
+    if (alimentacaoDiaCent) partesGastos.push('alimentação ' + reaisFmt(alimentacaoDiaCent) + '/dia × ' + diarias);
+    if (passagemCent) partesGastos.push('passagem ' + reaisFmt(passagemCent));
+    const gastosTxt = previstoCent
+      ? ' · Previsto: ' + reaisFmt(previstoCent) + ' (' + partesGastos.join(' · ') + ')'
+      : '';
     const valorTxt = valorTotalCent ? reaisFmt(valorTotalCent) : 'a definir pelos comprovantes';
     chamado = Object.assign(base, {
       colaborador,
@@ -529,11 +568,11 @@ rota('POST', '/api/chamados', null, (ctx) => {
       colaborador.nome + ' · ' + colaborador.destino +
       ' · Ida ' + dataViagemFmt(dataIda) +
       (colaborador.dataVolta ? ' · Volta ' + dataViagemFmt(colaborador.dataVolta) : '') +
-      ' · Valor ' + valorTxt);
+      ' · Valor ' + valorTxt + gastosTxt);
     d.db.chamados.push(chamado);
     auditar(ctx.usuario, 'Abriu chamado de viagem de colaborador ' + chamado.id,
       colaborador.nome + ' · ' + colaborador.destino + ' · ida ' + dataViagemFmt(dataIda) +
-      ' · Valor ' + valorTxt, ctx.ip);
+      ' · Valor ' + valorTxt + gastosTxt, ctx.ip);
     criarNotificacao(
       'novo_chamado', chamado,
       'Nova viagem de colaborador ' + chamado.id + ' — ' + ctx.usuario.nome,
@@ -543,7 +582,7 @@ rota('POST', '/api/chamados', null, (ctx) => {
         '. Ida: ' + dataViagemFmt(dataIda) +
         (colaborador.dataVolta ? '. Volta: ' + dataViagemFmt(colaborador.dataVolta) : '') +
         (colaborador.motivo ? '. Motivo: ' + colaborador.motivo : '') +
-        '. Valor: ' + valorTxt + '.'
+        '. Valor: ' + valorTxt + gastosTxt + '.'
     );
   } else {
     // Chamado de VIAGEM (adiantamento 70/30).
@@ -703,9 +742,14 @@ rota('POST', '/api/chamados/:id/compra-paga', ['financeiro', 'admin'], (ctx) => 
   sendJson(ctx.res, 200, { chamado });
 });
 
-rota('POST', '/api/chamados/:id/cancelar', ['admin'], (ctx) => {
+rota('POST', '/api/chamados/:id/cancelar', null, (ctx) => {
   const chamado = acharChamado(ctx.params.id);
   if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
+  // Admin cancela qualquer chamado; o solicitante pode cancelar viagens de
+  // colaborador (única ação dele nesse tipo de chamado).
+  const podeCancelar = ctx.usuario.papel === 'admin' ||
+    (ctx.usuario.papel === 'solicitante' && chamado.tipo === 'colaborador');
+  if (!podeCancelar) return erro(ctx.res, 403, 'Sem permissão para cancelar este chamado.');
   if (chamado.status === 'finalizado') return erro(ctx.res, 400, 'Chamado já finalizado.');
   chamado.status = 'cancelado';
   historico(chamado, ctx.usuario, 'Chamado cancelado.', txt(ctx.body.motivo, 300) || null);
@@ -722,13 +766,17 @@ rota('POST', '/api/chamados/:id/cancelar', ['admin'], (ctx) => {
 function categoriasAnexo(chamado) {
   return chamado.tipo === 'colaborador'
     ? { hotel: 'Comprovante de hotel', passagem: 'Comprovante de passagem', alimentacao: 'Comprovante de alimentação' }
-    : { entrada: 'Foto de entrada', saida: 'Foto de saída' };
+    : { entrada: 'Foto de entrada', saida: 'Foto de saída', romaneio: 'Romaneio do transporte' };
 }
 
 rota('POST', '/api/chamados/:id/anexos', null, (ctx) => {
   const chamado = acharChamado(ctx.params.id);
   if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
   if (!podeVerChamado(ctx.usuario, chamado)) return erro(ctx.res, 403, 'Sem permissão.');
+  // Solicitante vê a viagem de colaborador, mas não anexa nela.
+  if (chamado.tipo === 'colaborador' && ctx.usuario.papel === 'solicitante') {
+    return erro(ctx.res, 403, 'Comprovantes da viagem de colaborador são anexados pelo financeiro.');
+  }
   if (chamado.status === 'cancelado') return erro(ctx.res, 400, 'Chamado cancelado.');
   const categorias = categoriasAnexo(chamado);
   const tipo = categorias[ctx.body.tipo] ? String(ctx.body.tipo) : null;
@@ -787,6 +835,9 @@ rota('DELETE', '/api/chamados/:id/anexos/:anexoId', null, (ctx) => {
   const chamado = acharChamado(ctx.params.id);
   if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
   if (!podeVerChamado(ctx.usuario, chamado)) return erro(ctx.res, 403, 'Sem permissão.');
+  if (chamado.tipo === 'colaborador' && ctx.usuario.papel === 'solicitante') {
+    return erro(ctx.res, 403, 'Comprovantes da viagem de colaborador são geridos pelo financeiro.');
+  }
   if (chamado.status === 'finalizado') return erro(ctx.res, 400, 'Chamado finalizado: anexos não podem mais ser removidos.');
   const categorias = categoriasAnexo(chamado);
   for (const tipo of Object.keys(chamado.anexos)) {
@@ -833,7 +884,9 @@ rota('POST', '/api/notificacoes/:id/reconhecer', ['financeiro', 'admin'], (ctx) 
 // ---- relatórios (apenas quem visualiza os chamados: financeiro/admin) --------
 // Movimento completo: viagens e compras, para o front montar as listas
 // separadas e a combinada por dia.
-rota('GET', '/api/relatorios/movimento', ['financeiro', 'admin'], (ctx) => {
+// Relatórios abertos a todos os papéis: é por aqui que o solicitante
+// acessa as viagens (as linhas levam ao chamado).
+rota('GET', '/api/relatorios/movimento', null, (ctx) => {
   const itens = d.db.chamados
     .slice()
     .sort((a, b) => (a.criadoEm < b.criadoEm ? 1 : -1))

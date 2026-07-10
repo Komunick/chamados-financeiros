@@ -258,13 +258,15 @@
     nav.innerHTML = '';
     const links = [
       ['#/viagens', 'Transporte'],
-      ['#/colaborador', 'Colaborador'],
+      // Viagens de colaborador são restritas ao financeiro/admin.
+      ...(ehFinanceiro() ? [['#/colaborador', 'Colaborador']] : []),
       ['#/compras', 'Compras'],
       ['#/novo', 'Novo chamado'],
       ['#/historico', 'Histórico'],
       ['#/telefones', 'Telefones'],
+      // Relatórios abertos a todos: é por eles que o solicitante acessa as viagens.
+      ['#/relatorios', 'Relatórios'],
     ];
-    if (ehFinanceiro()) links.push(['#/relatorios', 'Relatórios']);
     if (ehFinanceiro()) links.push(['#/notificacoes', 'Notificações']);
     if (ehFinanceiro()) links.push(['#/auditoria', 'Auditoria']);
     if (ehAdmin()) links.push(['#/usuarios', 'Usuários']);
@@ -287,13 +289,13 @@
     try {
       if (rota === '/novo' || rota === '/novo/compra' || rota === '/novo/colaborador') {
         return renderNovo(cont, rota === '/novo/compra' ? 'compra'
-          : rota === '/novo/colaborador' ? 'colaborador' : 'viagem');
+          : rota === '/novo/colaborador' && ehFinanceiro() ? 'colaborador' : 'viagem');
       }
       if (rota === '/compras') return await renderLista(cont, 'compra');
-      if (rota === '/colaborador') return await renderLista(cont, 'colaborador');
+      if (rota === '/colaborador' && ehFinanceiro()) return await renderLista(cont, 'colaborador');
       if (rota === '/historico') return await renderHistorico(cont);
       if (rota === '/telefones') return await renderTelefones(cont);
-      if (rota === '/relatorios' && ehFinanceiro()) return await renderRelatorios(cont);
+      if (rota === '/relatorios') return await renderRelatorios(cont);
       if (rota === '/notificacoes' && ehFinanceiro()) return await renderNotificacoes(cont);
       if (rota === '/auditoria' && ehFinanceiro()) return await renderAuditoria(cont);
       if (rota === '/usuarios' && ehAdmin()) return await renderUsuarios(cont);
@@ -976,6 +978,31 @@
     const colabIda = campo('Data de ida *', { type: 'date' });
     const colabVolta = campo('Data de volta', { type: 'date' });
     const colabMotivo = campo('Motivo da viagem', { placeholder: 'Ex.: treinamento, visita a cliente…' });
+    // Gastos previstos por categoria (alimentação é valor POR DIA).
+    const colabHotel = campo('Hotel (R$)', { placeholder: 'Ex.: 450,00 — valor da estadia' });
+    const colabAlimentacao = campo('Alimentação (R$ por dia)', { placeholder: 'Ex.: 80,00 por dia' });
+    const colabPassagem = campo('Passagem (R$)', { placeholder: 'Ex.: 320,00 — ida e volta' });
+    const previaGastos = el('p', { class: 'mudo' },
+      'O total previsto soma hotel + alimentação (diária × dias de viagem) + passagem.');
+    function diariasColab() {
+      const ida = colabIda.input.value, volta = colabVolta.input.value;
+      if (!ida || !volta || volta < ida) return 1;
+      return Math.max(1, Math.round((Date.parse(volta) - Date.parse(ida)) / 86400000) + 1);
+    }
+    function atualizarPreviaGastos() {
+      const hotel = parseMoeda(colabHotel.input.value) || 0;
+      const dia = parseMoeda(colabAlimentacao.input.value) || 0;
+      const passagem = parseMoeda(colabPassagem.input.value) || 0;
+      const dias = diariasColab();
+      const total = hotel + dia * dias + passagem;
+      previaGastos.textContent = total
+        ? 'Total previsto: ' + fmtMoeda(total) +
+          (dia ? ' (alimentação ' + fmtMoeda(dia) + '/dia × ' + dias + (dias > 1 ? ' dias)' : ' dia)') : '')
+        : 'O total previsto soma hotel + alimentação (diária × dias de viagem) + passagem.';
+    }
+    for (const f of [colabHotel, colabAlimentacao, colabPassagem, colabIda, colabVolta]) {
+      f.input.addEventListener('input', atualizarPreviaGastos);
+    }
 
     const obs = el('textarea', { rows: '3', placeholder: 'Motivo, detalhes, observações…' });
 
@@ -997,6 +1024,10 @@
       el('div', { class: 'form-grade' },
         colabNome.rotulo, colabDestino.rotulo, colabIda.rotulo,
         colabVolta.rotulo, colabMotivo.rotulo),
+      el('h3', { class: 'form-secao' }, 'Gastos previstos por categoria'),
+      el('div', { class: 'form-grade' },
+        colabHotel.rotulo, colabAlimentacao.rotulo, colabPassagem.rotulo),
+      previaGastos,
       el('p', { class: 'mudo' },
         'Depois de abrir o chamado, anexe os comprovantes da viagem — hotel, ' +
         'passagens e alimentação — na aba "Comprovantes" do próprio chamado.'));
@@ -1053,12 +1084,24 @@
           if (colabVolta.input.value && colabVolta.input.value < colabIda.input.value) {
             toast('A data de volta não pode ser antes da ida.', 'erro'); colabVolta.input.focus(); return;
           }
+          const gastos = {};
+          for (const [f, chave, rotulo] of [
+            [colabHotel, 'hotelCent', 'do hotel'],
+            [colabAlimentacao, 'alimentacaoDiaCent', 'diário de alimentação'],
+            [colabPassagem, 'passagemCent', 'da passagem'],
+          ]) {
+            if (!f.input.value.trim()) { gastos[chave] = 0; continue; }
+            const cent = parseMoeda(f.input.value);
+            if (!cent) { toast('Valor ' + rotulo + ' inválido. Use o formato 450,00 ou deixe em branco.', 'erro'); f.input.focus(); return; }
+            gastos[chave] = cent;
+          }
           corpo.colaborador = {
             nome: colabNome.input.value,
             destino: colabDestino.input.value,
             dataIda: colabIda.input.value,
             dataVolta: colabVolta.input.value,
             motivo: colabMotivo.input.value,
+            gastos,
           };
         } else if (tipo === 'viagem') {
           if (!placaValida(placa.input.value)) { toast('Placa inválida. Use ABC-1234 (antiga) ou ABC1D23 (Mercosul).', 'erro'); placa.input.focus(); return; }
@@ -1094,7 +1137,8 @@
       },
     },
       el('h3', { class: 'form-secao' }, 'Tipo de chamado'),
-      el('div', { class: 'tipo-escolha' }, btnViagem, btnColaborador, btnCompra),
+      // Viagem de colaborador só aparece para financeiro/admin.
+      el('div', { class: 'tipo-escolha' }, btnViagem, ehFinanceiro() ? btnColaborador : null, btnCompra),
       secViagemVeiculo,
       secColaborador,
       secCompra,
@@ -1116,9 +1160,12 @@
     cont.append(el('div', { class: 'cartao' },
       el('div', { class: 'linha-topo' }, el('h2', null, 'Novo chamado')),
       el('p', { class: 'mudo' },
-        'Escolha o tipo do chamado: adiantamento de transporte (70/30), ' +
-        'viagem de colaborador (comprovantes de hotel, passagens e alimentação) ' +
-        'ou compra (pagamento único).'),
+        ehFinanceiro()
+          ? 'Escolha o tipo do chamado: adiantamento de transporte (70/30), ' +
+            'viagem de colaborador (gastos por categoria — hotel, alimentação e passagem) ' +
+            'ou compra (pagamento único).'
+          : 'Escolha o tipo do chamado: adiantamento de transporte (70/30) ' +
+            'ou compra (pagamento único).'),
       form));
   }
 
@@ -1134,7 +1181,8 @@
       ['historico', 'Histórico'],
     ] : c.tipo === 'colaborador' ? [
       ['financeiro', 'Pagamento'],
-      ['anexos', 'Comprovantes'],
+      // Solicitante vê a viagem de colaborador só leitura: sem aba de anexos.
+      ...(ehFinanceiro() ? [['anexos', 'Comprovantes']] : []),
       ['dados', 'Dados'],
       ['historico', 'Histórico'],
     ] : [
@@ -1212,6 +1260,21 @@
           : 'Sem valor definido — o financeiro informa o valor ao registrar o pagamento.')));
     corpo.append(el('div', { class: 'valores' }, cartao));
 
+    // Gastos previstos por categoria (viagem de colaborador).
+    const g = ehColab && c.colaborador ? c.colaborador.gastos : null;
+    if (g && g.previstoCent) {
+      const plural = g.diarias > 1 ? ' dias' : ' dia';
+      corpo.append(
+        el('h4', { class: 'form-secao' }, 'Gastos previstos por categoria'),
+        el('div', { class: 'valores' },
+          g.hotelCent ? cartaoValor('Hotel', g.hotelCent, null, 'Valor da estadia.') : null,
+          g.alimentacaoDiaCent ? cartaoValor('Alimentação', g.alimentacaoTotalCent, null,
+            fmtMoeda(g.alimentacaoDiaCent) + ' por dia × ' + g.diarias + plural + '.') : null,
+          g.passagemCent ? cartaoValor('Passagem', g.passagemCent, null, 'Valor da passagem.') : null,
+          cartaoValor('Total previsto', g.previstoCent, null,
+            'Hotel + alimentação + passagem. O valor final é confirmado pelos comprovantes.', true)));
+    }
+
     const acoes = el('div', { class: 'acoes-status' });
     if (ehFinanceiro() && !c.compraPagaEm && c.status !== 'cancelado') {
       acoes.append(el('button', {
@@ -1231,7 +1294,10 @@
         },
       }, ehColab ? 'Marcar viagem como paga' : 'Marcar compra como paga'));
     }
-    if (ehAdmin() && c.status !== 'finalizado' && c.status !== 'cancelado') {
+    // Admin cancela sempre; na viagem de colaborador o solicitante também
+    // pode cancelar (é a única ação dele nesse tipo de chamado).
+    const podeCancelar = ehAdmin() || (ehColab && !ehFinanceiro());
+    if (podeCancelar && c.status !== 'finalizado' && c.status !== 'cancelado') {
       acoes.append(el('button', {
         class: 'btn btn-perigo',
         onclick: () => { if (confirm('Cancelar este chamado?')) acaoChamado('/api/chamados/' + c.id + '/cancelar', 'Chamado cancelado.'); },
@@ -1353,7 +1419,10 @@
     } else {
       corpo.append(el('div', { class: 'anexos-grupos' },
         grupo('entrada', 'Entrada da viagem', 'Fotos do veículo/odômetro na SAÍDA da base (início da viagem).', 'Anexar foto de entrada'),
-        grupo('saida', 'Saída da viagem', 'Fotos do veículo/odômetro no RETORNO (fim da viagem).', 'Anexar foto de saída')));
+        grupo('saida', 'Saída da viagem', 'Fotos do veículo/odômetro no RETORNO (fim da viagem).', 'Anexar foto de saída'),
+        grupo('romaneio', 'Romaneio do transporte',
+          'OBRIGATÓRIO: o motorista envia o romaneio do transporte e o solicitante anexa aqui (foto ou print).',
+          'Anexar romaneio')));
     }
     if (bloqueado) corpo.append(el('p', { class: 'mudo' }, 'Chamado ' + STATUS_LABEL[c.status].toLowerCase() + ': os anexos estão travados.'));
   }
@@ -1399,6 +1468,15 @@
           ['Situação', c.compraPagaEm ? 'Pago em ' + fmtData(c.compraPagaEm) : 'Pendente'],
           ['Comprovantes', totalComprovantes ? totalComprovantes + ' anexado(s)' : 'Nenhum ainda'],
         ]),
+        c.colaborador.gastos && c.colaborador.gastos.previstoCent ? bloco('Gastos previstos', [
+          ['Hotel', c.colaborador.gastos.hotelCent ? fmtMoeda(c.colaborador.gastos.hotelCent) : ''],
+          ['Alimentação', c.colaborador.gastos.alimentacaoDiaCent
+            ? fmtMoeda(c.colaborador.gastos.alimentacaoDiaCent) + '/dia × ' + c.colaborador.gastos.diarias +
+              ' = ' + fmtMoeda(c.colaborador.gastos.alimentacaoTotalCent)
+            : ''],
+          ['Passagem', c.colaborador.gastos.passagemCent ? fmtMoeda(c.colaborador.gastos.passagemCent) : ''],
+          ['Total previsto', fmtMoeda(c.colaborador.gastos.previstoCent)],
+        ]) : null,
         bloco('Chamado', [
           ['Solicitante', c.solicitante.nome],
           ['Aberto em', fmtData(c.criadoEm)],
