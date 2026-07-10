@@ -3,7 +3,10 @@
 # Execute pelo INSTALAR-AUTOINICIO.bat (que pede elevacao). Requer admin.
 
 $ErrorActionPreference = 'Stop'
-$bat = 'C:\Users\brazil\opencode\chamados-web\start-server.bat'
+# start-server.bat fica na pasta-mãe deste .ps1 (…\chamados-web\). Resolvemos
+# pelo caminho do próprio script, sem depender de um local fixo no disco.
+$bat = Join-Path (Split-Path $PSScriptRoot -Parent) 'start-server.bat'
+if (-not (Test-Path $bat)) { throw "start-server.bat nao encontrado em: $bat" }
 
 $action    = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument ('/c "{0}"' -f $bat)
 $trigger   = New-ScheduledTaskTrigger -AtStartup

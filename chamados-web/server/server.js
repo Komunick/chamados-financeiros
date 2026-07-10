@@ -62,8 +62,33 @@ function erro(res, status, msg) { sendJson(res, status, { error: msg }); }
 const sseClients = new Set();
 let revision = 0;
 
+// Tickets efêmeros para o SSE. O EventSource do navegador não permite enviar
+// cabeçalhos, então precisa carregar a credencial na URL — e URL vai parar em
+// log de acesso e histórico. Em vez do token de sessão (válido 30 dias), o
+// front pede um ticket de uso único e curta duração (30 s) por header e o usa
+// só para abrir a conexão. Assim nenhum token de longa duração aparece em URL.
+const sseTickets = new Map(); // ticket -> { usuarioId, expira }
+const SSE_TICKET_MS = 30 * 1000;
+function emitirTicketSSE(usuario) {
+  const ticket = crypto.randomBytes(24).toString('hex');
+  sseTickets.set(ticket, { usuarioId: usuario.id, expira: Date.now() + SSE_TICKET_MS });
+  // limpeza preguiçosa dos expirados para o Map não crescer sem limite
+  if (sseTickets.size > 200) {
+    const agora = Date.now();
+    for (const [k, v] of sseTickets) if (v.expira < agora) sseTickets.delete(k);
+  }
+  return ticket;
+}
+function consumirTicketSSE(ticket) {
+  const reg = ticket && sseTickets.get(ticket);
+  if (!reg) return null;
+  sseTickets.delete(ticket); // uso único
+  if (reg.expira < Date.now()) return null;
+  return d.db.usuarios.find((u) => u.id === reg.usuarioId) || null;
+}
+
 function handleSSE(req, res, query) {
-  const usuario = d.usuarioPorToken(query.get('token'));
+  const usuario = consumirTicketSSE(query.get('ticket'));
   if (!usuario) return erro(res, 401, 'Sessão inválida.');
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
@@ -342,6 +367,12 @@ rota('POST', '/api/auth/logout', null, (ctx) => {
 
 rota('GET', '/api/me', null, (ctx) => {
   sendJson(ctx.res, 200, { usuario: publicoUsuario(ctx.usuario) });
+});
+
+// Ticket de uso único (curta duração) para abrir a conexão SSE sem colocar o
+// token de sessão na URL. Autentica pelo header x-token, como todas as rotas.
+rota('POST', '/api/events/ticket', null, (ctx) => {
+  sendJson(ctx.res, 200, { ticket: emitirTicketSSE(ctx.usuario) });
 });
 
 rota('POST', '/api/auth/trocar-senha', null, (ctx) => {
@@ -745,8 +776,13 @@ rota('POST', '/api/chamados/:id/compra-paga', ['financeiro', 'admin'], (ctx) => 
 rota('POST', '/api/chamados/:id/cancelar', null, (ctx) => {
   const chamado = acharChamado(ctx.params.id);
   if (!chamado) return erro(ctx.res, 404, 'Chamado não encontrado.');
-  // Admin cancela qualquer chamado; o solicitante pode cancelar viagens de
-  // colaborador (única ação dele nesse tipo de chamado).
+  // Decisão de produto (a pedido): admin cancela qualquer chamado; o
+  // solicitante pode cancelar viagens de COLABORADOR — é a única ação dele
+  // nesse tipo (não abre, não anexa, não paga). Viagens de colaborador são
+  // criadas pelo financeiro e não têm um solicitante-dono, então não há como
+  // escopar por dono; qualquer solicitante pode cancelá-las. O cancelamento
+  // fica sempre registrado na auditoria e no histórico, e chamados já
+  // finalizados (pagos) não podem ser cancelados.
   const podeCancelar = ctx.usuario.papel === 'admin' ||
     (ctx.usuario.papel === 'solicitante' && chamado.tipo === 'colaborador');
   if (!podeCancelar) return erro(ctx.res, 403, 'Sem permissão para cancelar este chamado.');
@@ -881,13 +917,18 @@ rota('POST', '/api/notificacoes/:id/reconhecer', ['financeiro', 'admin'], (ctx) 
   sendJson(ctx.res, 200, { notificacao: n });
 });
 
-// ---- relatórios (apenas quem visualiza os chamados: financeiro/admin) --------
-// Movimento completo: viagens e compras, para o front montar as listas
-// separadas e a combinada por dia.
-// Relatórios abertos a todos os papéis: é por aqui que o solicitante
-// acessa as viagens (as linhas levam ao chamado).
+// ---- relatórios -------------------------------------------------------------
+// Movimento: viagens e compras, para o front montar as listas separadas e a
+// combinada por dia.
+// Abertos a todos os papéis — é por aqui que o solicitante chega às viagens de
+// colaborador (as linhas levam ao chamado). Mas o solicitante NÃO vê os
+// chamados dos outros: aplicamos o MESMO escopo de podeVerChamado (financeiro/
+// admin veem tudo; solicitante vê viagens de colaborador + os próprios
+// chamados). Assim os relatórios seguem úteis sem vazar valores/rota/condutor
+// dos chamados alheios.
 rota('GET', '/api/relatorios/movimento', null, (ctx) => {
   const itens = d.db.chamados
+    .filter((c) => podeVerChamado(ctx.usuario, c))
     .slice()
     .sort((a, b) => (a.criadoEm < b.criadoEm ? 1 : -1))
     .map((c) => ({
@@ -1034,7 +1075,10 @@ function handleApi(req, res) {
     const urlPath = u.pathname;
     const query = u.searchParams;
     const ip = (req.socket && req.socket.remoteAddress) || '?';
-    const token = req.headers['x-token'] || query.get('token') || '';
+    // Token de sessão SOMENTE por header — nunca aceito via query string (a URL
+    // vaza para logs/histórico). O SSE, que não pode mandar header, usa um
+    // ticket efêmero próprio (POST /api/events/ticket + handleSSE).
+    const token = req.headers['x-token'] || '';
 
     for (const r of rotas) {
       if (r.metodo !== req.method) continue;
@@ -1107,11 +1151,30 @@ const server = http.createServer((req, res) => {
   serveStatic(req, res);
 });
 
+// Aviso de segurança: se algum admin ainda estiver com a senha de fábrica
+// (admin/admin123), grita no log a cada boot até que seja trocada. A senha
+// padrão só existe para o primeiríssimo acesso — deve ser trocada logo depois.
+function avisarSenhaPadrao() {
+  const comPadrao = d.db.usuarios.filter((u) =>
+    u.papel === 'admin' && d.hashSenha('admin123', u.sal) === u.senhaHash);
+  if (!comPadrao.length) return;
+  const linha = '='.repeat(64);
+  console.warn('\n' + linha);
+  console.warn('[Chamados Financeiros] ATENÇÃO: senha PADRÃO ainda em uso!');
+  for (const u of comPadrao) {
+    console.warn(`  - admin "${u.login}" continua com a senha de fábrica "admin123".`);
+  }
+  console.warn('  Troque agora em Usuários → Trocar senha (ou peça para o admin trocar).');
+  console.warn('  Enquanto a senha padrão existir, qualquer um na rede pode entrar como admin.');
+  console.warn(linha + '\n');
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`[Chamados Financeiros] servidor no ar em http://${HOST}:${PORT}`);
   console.log(`[Chamados Financeiros] dados em: ${d.DATA_FILE}`);
   console.log(`[Chamados Financeiros] anexos em: ${d.ANEXOS_DIR}`);
   console.log(`[Chamados Financeiros] lembrete do saldo: ${Math.round(LEMBRETE_MS / 3600000)}h após o encerramento`);
+  avisarSenhaPadrao();
 });
 
 // Verificador do lembrete de 5 dias (roda a cada 5 minutos).

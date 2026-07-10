@@ -6,7 +6,7 @@ if %errorlevel% neq 0 (
   powershell -Command "Start-Process '%~f0' -Verb RunAs"
   exit /b
 )
-powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\brazil\opencode\chamados-web\server\instalar-autostart.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0server\instalar-autostart.ps1"
 echo.
 echo Pronto. Pode fechar esta janela.
 pause

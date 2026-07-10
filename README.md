@@ -98,13 +98,15 @@ O cadastro vem de dois arquivos e é importado pela ferramenta
 `IMPORTAR-CADASTRO.bat`):
 
 - **Placas** — planilha da frota exportada do CertaDoc
-  (`FROTA CERTADOC (2).xlsx`, aba "1º PASSO", colunas PLACA/RENAVAM);
-- **Motoristas** — CSV `PROGRAMAÇÃO BRAZIL TRANSPORTS - MOTORISTAS.csv`
-  (colunas MOTORISTA, CPF, TELEFONE, STATUS, FROTA / AGREGADO,
-  VENCIMENTO CNH).
+  (`FROTA CERTADOC (2).xlsx`, aba "1º PASSO", colunas PLACA/RENAVAM)
+  somadas às placas da aba VEÍCULOS/CARRETAS da programação;
+- **Motoristas** — planilha da programação
+  (`PROGRAMAÇÃO BRAZIL TRANSPORTS.xlsx`), aba MOTORISTAS (nome, CPF,
+  telefone, vínculo, CNH), completada pela aba CONTATOS para quem
+  estiver sem telefone.
 
 Os caminhos padrão apontam para a pasta Downloads; para usar outros:
-`uv run --with openpyxl python importar-cadastro.py --frota "..." --motoristas "..."`.
+`uv run --with openpyxl python importar-cadastro.py --frota "...\FROTA.xlsx" --programacao "...\PROGRAMACAO.xlsx"`.
 O resultado fica em `chamados-data\cadastro.json`, servido pela API
 `GET /api/cadastro` (o servidor recarrega sozinho quando o arquivo muda —
 não precisa reiniciar). **Rode a importação de novo sempre que a frota ou a

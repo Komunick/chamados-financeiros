@@ -13,3 +13,9 @@ node_modules/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Artefatos de distribuição (pesados) — não versionar; publicar como release.
+# Inclui o pacote pronto com o instalador do Node (~30 MB).
+Chamados-Financeiros.zip
+*.zip
+*.msi

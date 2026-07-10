@@ -174,30 +174,54 @@
     state.token = '';
     state.usuario = null;
     localStorage.removeItem('chamados.token');
+    clearTimeout(state.sseTimer);
     if (state.sse) { state.sse.close(); state.sse = null; }
     $('#tela-app').classList.add('oculto');
     $('#tela-login').classList.remove('oculto');
   }
 
   // ------------------------------------------------------------------ SSE
+  function reagendarSSE() {
+    if (!state.token) return;
+    const espera = state.sseBackoff || 3000;
+    state.sseBackoff = Math.min(espera * 2, 30000);
+    clearTimeout(state.sseTimer);
+    state.sseTimer = setTimeout(conectarSSE, espera);
+  }
+
   function conectarSSE() {
-    if (state.sse) state.sse.close();
-    const sse = new EventSource('/api/events?token=' + encodeURIComponent(state.token));
-    sse.onmessage = (ev) => {
-      let dados;
-      try { dados = JSON.parse(ev.data); } catch (e) { return; }
-      if (dados.tipo === 'mudanca') {
-        atualizarSeSeguro(); // recarrega a visão atual (sem apagar formulário em edição)
-        if (ehFinanceiro()) atualizarSino();
-      } else if (dados.tipo === 'notificacao' && ehFinanceiro()) {
-        const n = dados.notificacao;
-        tocarAlerta();
-        toast(n.mensagem, 'notif', n.titulo, () => { location.hash = '#/chamado/' + n.chamadoId; });
-        tentarNotificacaoNavegador(n);
-        atualizarSino();
-      }
-    };
-    state.sse = sse;
+    if (state.sse) { state.sse.close(); state.sse = null; }
+    clearTimeout(state.sseTimer);
+    if (!state.token) return;
+    // Pede um ticket efêmero (por header) e abre o EventSource com ele — assim
+    // o token de sessão nunca vai para a URL. O ticket é de uso único, então a
+    // reconexão automática do EventSource (mesma URL) falharia; por isso nós
+    // fechamos no onerror e reconectamos pegando um ticket novo.
+    api('POST', '/api/events/ticket').then((r) => {
+      if (!state.token) return; // saiu enquanto pedia o ticket
+      const sse = new EventSource('/api/events?ticket=' + encodeURIComponent(r.ticket));
+      state.sse = sse;
+      sse.onopen = () => { state.sseBackoff = 3000; };
+      sse.onmessage = (ev) => {
+        let dados;
+        try { dados = JSON.parse(ev.data); } catch (e) { return; }
+        if (dados.tipo === 'mudanca') {
+          atualizarSeSeguro(); // recarrega a visão atual (sem apagar formulário em edição)
+          if (ehFinanceiro()) atualizarSino();
+        } else if (dados.tipo === 'notificacao' && ehFinanceiro()) {
+          const n = dados.notificacao;
+          tocarAlerta();
+          toast(n.mensagem, 'notif', n.titulo, () => { location.hash = '#/chamado/' + n.chamadoId; });
+          tentarNotificacaoNavegador(n);
+          atualizarSino();
+        }
+      };
+      sse.onerror = () => {
+        sse.close();
+        if (state.sse === sse) state.sse = null;
+        reagendarSSE();
+      };
+    }).catch(() => { reagendarSSE(); });
   }
 
   function tocarAlerta() {
@@ -1393,9 +1417,21 @@
       if (!lista.length) minis.append(el('span', { class: 'mudo' },
         c.tipo === 'colaborador' ? 'Nenhum comprovante anexado ainda.' : 'Nenhuma foto anexada ainda.'));
       for (const a of lista) {
-        const url = '/api/chamados/' + c.id + '/anexos/' + a.id + '?token=' + encodeURIComponent(state.token);
+        const url = '/api/chamados/' + c.id + '/anexos/' + a.id;
+        // Busca com o token no HEADER (nunca na URL) e mostra via blob. Assim o
+        // token não aparece no src da imagem, no histórico nem em logs.
+        const img = el('img', { alt: a.nome, title: a.nome + ' — enviada por ' + a.por + ' em ' + fmtData(a.em) });
+        fetch(url, { headers: { 'X-Token': state.token } })
+          .then((resp) => (resp.ok ? resp.blob() : Promise.reject(new Error('erro'))))
+          .then((blob) => {
+            const obj = URL.createObjectURL(blob);
+            img.src = obj;
+            img.style.cursor = 'zoom-in';
+            img.onclick = () => window.open(obj, '_blank');
+          })
+          .catch(() => { img.alt = 'Falha ao carregar ' + a.nome; });
         const mini = el('div', { class: 'anexo-mini' },
-          el('img', { src: url, alt: a.nome, title: a.nome + ' — enviada por ' + a.por + ' em ' + fmtData(a.em), onclick: () => window.open(url, '_blank') }),
+          img,
           el('div', { class: 'legenda' }, a.nome));
         if (!bloqueado) {
           mini.append(el('button', {
