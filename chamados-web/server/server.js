@@ -367,7 +367,7 @@ rota('POST', '/api/usuarios', ['admin'], (ctx) => {
   const senha = String(ctx.body.senha || '');
   const papel = String(ctx.body.papel || '');
   if (!nome || !login) return erro(ctx.res, 400, 'Informe nome e login.');
-  if (!/^[a-z0-9._-]+$/.test(login)) return erro(ctx.res, 400, 'Login: use apenas letras, números, ponto, hífen.');
+  if (!/^[a-z0-9.@_-]+$/.test(login)) return erro(ctx.res, 400, 'Login: use apenas letras, números, ponto, hífen ou e-mail.');
   if (senha.length < 6) return erro(ctx.res, 400, 'A senha precisa ter ao menos 6 caracteres.');
   if (!['solicitante', 'financeiro', 'admin'].includes(papel)) return erro(ctx.res, 400, 'Papel inválido.');
   if (d.db.usuarios.some((u) => u.login === login)) return erro(ctx.res, 409, 'Já existe um usuário com esse login.');

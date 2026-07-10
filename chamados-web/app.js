@@ -1607,7 +1607,7 @@
     cont.innerHTML = '';
 
     const nome = el('input', { type: 'text', placeholder: 'Nome completo' });
-    const login = el('input', { type: 'text', placeholder: 'login (sem espaços)' });
+    const login = el('input', { type: 'text', placeholder: 'login ou e-mail (sem espaços)' });
     const senha = el('input', { type: 'password', placeholder: 'mínimo 6 caracteres' });
     const papel = el('select', null,
       el('option', { value: 'solicitante' }, 'Solicitante (abre chamados)'),
@@ -1634,11 +1634,38 @@
     const tbody = el('tbody');
     const PAPEL_LABEL = { solicitante: 'Solicitante', financeiro: 'Financeiro', admin: 'Administrador' };
     for (const u of r.usuarios) {
+      // Papel editável direto na linha: mudou o select, confirma e salva.
+      const selPapel = el('select', null,
+        ...Object.entries(PAPEL_LABEL).map(([v, rot]) => el('option', { value: v }, rot)));
+      selPapel.value = u.papel;
+      selPapel.addEventListener('change', async () => {
+        const novo = selPapel.value;
+        if (novo === u.papel) return;
+        if (!confirm('Mudar o papel de ' + u.nome + ' para ' + PAPEL_LABEL[novo] + '?')) {
+          selPapel.value = u.papel;
+          return;
+        }
+        try {
+          await api('PUT', '/api/usuarios/' + u.id, { papel: novo });
+          toast('Papel de ' + u.nome + ' alterado para ' + PAPEL_LABEL[novo] + '.');
+          renderRota();
+        } catch (e) { toast(e.message, 'erro'); selPapel.value = u.papel; }
+      });
       tbody.append(el('tr', { style: 'cursor:default' },
         el('td', null, u.nome),
         el('td', null, u.login),
-        el('td', null, PAPEL_LABEL[u.papel] || u.papel),
+        el('td', null, selPapel),
         el('td', null,
+          el('button', {
+            class: 'btn btn-suave btn-mini',
+            onclick: async () => {
+              const novoNome = prompt('Novo nome para o login ' + u.login + ':', u.nome);
+              if (!novoNome || !novoNome.trim() || novoNome.trim() === u.nome) return;
+              try { await api('PUT', '/api/usuarios/' + u.id, { nome: novoNome.trim() }); toast('Nome alterado.'); renderRota(); }
+              catch (e) { toast(e.message, 'erro'); }
+            },
+          }, 'Renomear'),
+          ' ',
           el('button', {
             class: 'btn btn-suave btn-mini',
             onclick: async () => {
