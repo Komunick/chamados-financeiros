@@ -84,7 +84,7 @@
   const ehFinanceiro = () => state.usuario && (state.usuario.papel === 'financeiro' || state.usuario.papel === 'admin');
   const ehAdmin = () => state.usuario && state.usuario.papel === 'admin';
   const resumoChamado = (c) => c.tipo === 'compra'
-    ? (c.compra ? c.compra.descricao : '')
+    ? (c.compra ? (c.compra.quantidade > 1 ? c.compra.quantidade + '× ' : '') + c.compra.descricao : '')
     : c.tipo === 'colaborador'
       ? (c.colaborador ? c.colaborador.nome + ' → ' + c.colaborador.destino : '')
       : (c.veiculo ? c.veiculo.placa + ' · ' + c.veiculo.modelo : '');
@@ -354,7 +354,7 @@
       colunas = (c) => [
         el('strong', null, c.id),
         c.solicitante.nome,
-        c.compra ? c.compra.descricao : '',
+        resumoChamado(c),
         (c.compra && c.compra.fornecedor) || '—',
         fmtValorChamado(c),
         chipStatus(c.status),
@@ -759,7 +759,7 @@
       if (!compras.length) { corpo.append(el('div', { class: 'vazio' }, 'Nenhuma compra registrada.')); return; }
       corpo.append(porDia(compras,
         ['Nº', 'Solicitante', 'Descrição', 'Fornecedor', 'Valor', 'Status'],
-        (c) => [el('strong', null, c.id), c.solicitante, c.descricao, c.fornecedor || '—', fmtMoeda(c.valorTotalCent), chipStatus(c.status)]));
+        (c) => [el('strong', null, c.id), c.solicitante, (c.quantidade > 1 ? c.quantidade + '× ' : '') + c.descricao, c.fornecedor || '—', fmtMoeda(c.valorTotalCent), chipStatus(c.status)]));
       return;
     }
 
@@ -994,8 +994,33 @@
     });
 
     // ---- campos de compra ----
-    const compraDesc = campo('O que será comprado? *', { placeholder: 'Ex.: 4 pneus 295/80 R22.5' });
+    const compraDesc = campo('O que será comprado? *', { placeholder: 'Ex.: Pneu 295/80 R22.5' });
+    const compraQtd = campo('Quantidade *', { type: 'number', min: '1', step: '1', value: '1', inputmode: 'numeric' });
+    const compraUnit = campo('Valor unitário (R$)', { placeholder: 'Ex.: 1.850,00', inputmode: 'decimal' });
     const compraForn = campo('Fornecedor', { placeholder: 'Ex.: Pneus Brasil Ltda.' });
+    // Com o valor unitário preenchido, o total vira quantidade × unitário e o
+    // campo "Valor total" fica travado (o servidor recalcula de novo ao abrir).
+    const DICA_COMPRA = 'Informe o valor unitário para o total ser calculado sozinho (quantidade × unitário); sem ele, o financeiro define o valor ao pagar.';
+    const previaCompra = el('p', { class: 'mudo' }, DICA_COMPRA);
+    const moedaInput = (cent) => (cent / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const qtdCompra = () => {
+      const n = Math.floor(Number(compraQtd.input.value));
+      return Number.isFinite(n) && n >= 1 ? n : 0;
+    };
+    function atualizarValorCompra() {
+      if (tipo !== 'compra') { inputValor.removeAttribute('readonly'); return; }
+      const unit = parseMoeda(compraUnit.input.value);
+      const qtd = qtdCompra();
+      if (unit && qtd) {
+        inputValor.value = moedaInput(unit * qtd);
+        inputValor.setAttribute('readonly', '');
+        previaCompra.textContent = 'Valor total: ' + fmtMoeda(unit * qtd) + ' (' + qtd + ' × ' + fmtMoeda(unit) + ').';
+      } else {
+        inputValor.removeAttribute('readonly');
+        previaCompra.textContent = DICA_COMPRA;
+      }
+    }
+    for (const f of [compraQtd, compraUnit]) f.input.addEventListener('input', atualizarValorCompra);
 
     // ---- campos de viagem de colaborador ----
     const colabNome = campo('Nome do colaborador *', { placeholder: 'Quem vai viajar' });
@@ -1042,7 +1067,8 @@
 
     const secCompra = el('div', { class: 'oculto' },
       el('h3', { class: 'form-secao' }, 'Dados da compra'),
-      el('div', { class: 'form-grade' }, compraDesc.rotulo, compraForn.rotulo));
+      el('div', { class: 'form-grade' }, compraDesc.rotulo, compraQtd.rotulo, compraUnit.rotulo, compraForn.rotulo),
+      previaCompra);
 
     const secColaborador = el('div', { class: 'oculto' },
       el('h3', { class: 'form-secao' }, 'Dados da viagem do colaborador'),
@@ -1084,8 +1110,9 @@
         ? 'O sistema calcula automaticamente o adiantamento de 70% e o saldo de 30%.'
         : tipo === 'colaborador'
           ? 'Pode ficar em branco: o valor é definido depois, pelos comprovantes anexados à viagem.'
-          : 'Pode ficar em branco: o financeiro informa o valor ao registrar o pagamento.';
+          : 'Com o valor unitário preenchido, o total é calculado sozinho (quantidade × unitário); em branco, o financeiro informa ao pagar.';
       atualizarPrevia();
+      atualizarValorCompra();
     }
     btnViagem.addEventListener('click', () => definirTipo('viagem'));
     btnColaborador.addEventListener('click', () => definirTipo('colaborador'));
@@ -1145,7 +1172,15 @@
           corpo.rota = rotaViagem.input.value;
         } else {
           if (!compraDesc.input.value.trim()) { toast('Descreva o que será comprado.', 'erro'); compraDesc.input.focus(); return; }
-          corpo.compra = { descricao: compraDesc.input.value, fornecedor: compraForn.input.value };
+          const qtd = qtdCompra();
+          if (!qtd) { toast('Quantidade inválida: use um número inteiro a partir de 1.', 'erro'); compraQtd.input.focus(); return; }
+          const unitCent = parseMoeda(compraUnit.input.value);
+          if (compraUnit.input.value.trim() && !unitCent) { toast('Valor unitário inválido. Use o formato 1.850,00 ou deixe em branco.', 'erro'); compraUnit.input.focus(); return; }
+          corpo.compra = {
+            descricao: compraDesc.input.value, fornecedor: compraForn.input.value,
+            quantidade: qtd, valorUnitCent: unitCent || 0,
+          };
+          if (unitCent) corpo.valorTotalCent = unitCent * qtd;
         }
 
         btn.disabled = true;
@@ -1279,7 +1314,9 @@
         ? el('span', { class: 'chip chip-pago' }, 'Pago em ' + fmtData(c.compraPagaEm))
         : el('span', { class: 'chip chip-pendente' }, 'Pendente')),
       el('div', { class: 'obs' }, c.valorTotalCent
-        ? 'Pagamento único registrado pelo financeiro.'
+        ? (!ehColab && c.compra && c.compra.valorUnitCent
+          ? (c.compra.quantidade || 1) + ' × ' + fmtMoeda(c.compra.valorUnitCent) + ' — pagamento único registrado pelo financeiro.'
+          : 'Pagamento único registrado pelo financeiro.')
         : (ehColab
           ? 'Sem valor definido — some os comprovantes anexados; o financeiro informa o total ao pagar.'
           : 'Sem valor definido — o financeiro informa o valor ao registrar o pagamento.')));
@@ -1477,6 +1514,8 @@
       corpo.append(el('div', { class: 'dados-grade' },
         bloco('Compra', [
           ['Descrição', c.compra ? c.compra.descricao : ''],
+          ['Quantidade', c.compra && c.compra.quantidade ? String(c.compra.quantidade) : ''],
+          ['Valor unitário', c.compra && c.compra.valorUnitCent ? fmtMoeda(c.compra.valorUnitCent) : ''],
           ['Fornecedor', c.compra ? c.compra.fornecedor : ''],
           ['Valor', c.valorTotalCent ? fmtMoeda(c.valorTotalCent) : 'A definir'],
           ['Pagamento', c.compraPagaEm ? 'Pago em ' + fmtData(c.compraPagaEm) : 'Pendente'],
@@ -1701,6 +1740,16 @@
               catch (e) { toast(e.message, 'erro'); }
             },
           }, 'Renomear'),
+          ' ',
+          el('button', {
+            class: 'btn btn-suave btn-mini',
+            onclick: async () => {
+              const novoLogin = prompt('Novo login para ' + u.nome + ' (letras, números, ponto, hífen):', u.login);
+              if (!novoLogin || !novoLogin.trim() || novoLogin.trim().toLowerCase() === u.login) return;
+              try { await api('PUT', '/api/usuarios/' + u.id, { login: novoLogin.trim() }); toast('Login alterado.'); renderRota(); }
+              catch (e) { toast(e.message, 'erro'); }
+            },
+          }, 'Alterar login'),
           ' ',
           el('button', {
             class: 'btn btn-suave btn-mini',

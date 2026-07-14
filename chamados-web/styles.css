@@ -232,6 +232,9 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--primario);
   box-shadow: 0 0 0 1px var(--primario);
 }
+/* Campo calculado pelo sistema (ex.: total da compra = qtde × unitário) */
+input[readonly] { background: var(--fundo); color: var(--mudo); cursor: default; }
+input[readonly]:focus { border-color: var(--borda); box-shadow: none; }
 label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--tinta); }
 .form-grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
 .form-grade label { display: block; }

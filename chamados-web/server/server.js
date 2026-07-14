@@ -236,8 +236,10 @@ function criarNotificacao(tipo, chamado, titulo, mensagem) {
       tipoChamado: 'compra',
       solicitante: chamado.solicitante.nome,
       descricao: chamado.compra ? chamado.compra.descricao : '',
+      quantidade: (chamado.compra && chamado.compra.quantidade) || 1,
+      valorUnitario: (chamado.compra && chamado.compra.valorUnitCent) ? reaisFmt(chamado.compra.valorUnitCent) : '',
       fornecedor: chamado.compra ? chamado.compra.fornecedor : '',
-      valorTotal: reaisFmt(chamado.valorTotalCent),
+      valorTotal: chamado.valorTotalCent ? reaisFmt(chamado.valorTotalCent) : 'a definir',
       status: chamado.status,
     } : chamado.tipo === 'colaborador' ? {
       chamadoId: chamado.id,
@@ -414,6 +416,16 @@ rota('PUT', '/api/usuarios/:id', ['admin'], (ctx) => {
   const u = d.db.usuarios.find((x) => x.id === ctx.params.id);
   if (!u) return erro(ctx.res, 404, 'Usuário não encontrado.');
   const mudancas = [];
+  if (ctx.body.login !== undefined) {
+    const novoLogin = txt(ctx.body.login, 60).toLowerCase();
+    if (!novoLogin) return erro(ctx.res, 400, 'Informe o login.');
+    if (!/^[a-z0-9.@_-]+$/.test(novoLogin)) return erro(ctx.res, 400, 'Login: use apenas letras, números, ponto, hífen ou e-mail.');
+    if (d.db.usuarios.some((x) => x.login === novoLogin && x.id !== u.id)) return erro(ctx.res, 409, 'Já existe um usuário com esse login.');
+    if (novoLogin !== u.login) {
+      mudancas.push('login ' + u.login + ' → ' + novoLogin);
+      u.login = novoLogin;
+    }
+  }
   if (ctx.body.nome !== undefined) {
     u.nome = txt(ctx.body.nome, 80) || u.nome;
     mudancas.push('nome');
@@ -499,13 +511,35 @@ rota('POST', '/api/chamados', null, (ctx) => {
 
   let chamado;
   if (tipo === 'compra') {
-    // Chamado de COMPRA: pagamento único, sem 70/30.
+    // Chamado de COMPRA: pagamento único, sem 70/30. Com valor unitário
+    // informado, o total é SEMPRE quantidade × unitário (recalculado aqui,
+    // ignorando o total vindo do front).
+    const bruto = ctx.body.compra || {};
     const compra = {
-      descricao: txt(ctx.body.compra && ctx.body.compra.descricao, 200),
-      fornecedor: txt(ctx.body.compra && ctx.body.compra.fornecedor, 120),
+      descricao: txt(bruto.descricao, 200),
+      fornecedor: txt(bruto.fornecedor, 120),
+      quantidade: 1,
+      valorUnitCent: 0,
     };
     if (!compra.descricao) return erro(ctx.res, 400, 'Informe a descrição da compra.');
-    const valorTxt = valorTotalCent ? reaisFmt(valorTotalCent) : 'a definir';
+    if (bruto.quantidade !== undefined && bruto.quantidade !== null && String(bruto.quantidade) !== '') {
+      const q = Math.floor(Number(bruto.quantidade));
+      if (!Number.isFinite(q) || q < 1 || q > 100000) {
+        return erro(ctx.res, 400, 'Quantidade inválida: use um número inteiro de 1 a 100.000.');
+      }
+      compra.quantidade = q;
+    }
+    if (bruto.valorUnitCent) {
+      const unit = centavos(bruto.valorUnitCent);
+      if (!unit) return erro(ctx.res, 400, 'Valor unitário inválido.');
+      const total = unit * compra.quantidade;
+      if (total > 100000000000) return erro(ctx.res, 400, 'Valor total da compra alto demais.');
+      compra.valorUnitCent = unit;
+      base.valorTotalCent = total;
+    }
+    const valorTxt = base.valorTotalCent ? reaisFmt(base.valorTotalCent) : 'a definir';
+    const qtdTxt = compra.quantidade > 1 ? compra.quantidade + '× ' : '';
+    const unitTxt = compra.valorUnitCent ? ' (' + reaisFmt(compra.valorUnitCent) + '/un)' : '';
     chamado = Object.assign(base, {
       compra,
       veiculo: null,
@@ -522,16 +556,17 @@ rota('POST', '/api/chamados', null, (ctx) => {
       // aberto → finalizado (compra paga) | cancelado
     });
     historico(chamado, ctx.usuario, 'Chamado de compra aberto.',
-      compra.descricao + ' · Valor ' + valorTxt);
+      qtdTxt + compra.descricao + unitTxt + ' · Valor ' + valorTxt);
     d.db.chamados.push(chamado);
     auditar(ctx.usuario, 'Abriu chamado de compra ' + chamado.id,
-      compra.descricao + (compra.fornecedor ? ' · Fornecedor: ' + compra.fornecedor : '') +
+      qtdTxt + compra.descricao + unitTxt +
+      (compra.fornecedor ? ' · Fornecedor: ' + compra.fornecedor : '') +
       ' · Valor ' + valorTxt, ctx.ip);
     criarNotificacao(
       'novo_chamado', chamado,
       'Nova compra ' + chamado.id + ' — ' + ctx.usuario.nome,
       'Solicitante: ' + ctx.usuario.nome +
-        '. Compra: ' + compra.descricao +
+        '. Compra: ' + qtdTxt + compra.descricao + unitTxt +
         (compra.fornecedor ? '. Fornecedor: ' + compra.fornecedor : '') +
         '. Valor: ' + valorTxt + '.'
     );
@@ -942,6 +977,7 @@ rota('GET', '/api/relatorios/movimento', null, (ctx) => {
           ? (c.colaborador ? 'Colaborador — ' + c.colaborador.destino : '')
           : (c.veiculo ? (c.veiculo.placa + ' · ' + c.veiculo.modelo) : ''),
       fornecedor: (c.tipo === 'compra' && c.compra) ? c.compra.fornecedor : '',
+      quantidade: (c.tipo === 'compra' && c.compra && c.compra.quantidade) || null,
       condutor: c.tipo === 'colaborador'
         ? (c.colaborador ? c.colaborador.nome : '')
         : (c.tipo !== 'compra' && c.condutor) ? c.condutor.nome : '',
