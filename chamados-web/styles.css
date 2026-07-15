@@ -488,3 +488,20 @@ label.com-sugestoes { position: relative; }
   .conteudo { padding: 16px 12px 60px; }
   table.lista th, table.lista td { padding: 8px; }
 }
+
+/* ===================== Melhorias para celular =====================
+   Campos sem zoom automático do iOS e alvos de toque maiores. */
+@media (max-width: 768px) {
+  input, select, textarea { font-size: 16px; }
+  .btn { min-height: 44px; padding: 11px 18px; }
+  .btn-mini { min-height: 34px; padding: 6px 12px; }
+  .aba { padding: 11px 14px; }
+  .tipo-btn { padding: 12px 18px; flex: 1 1 auto; }
+  .filtros input, .filtros select { min-width: 0; width: 100%; }
+  .tabela-envolta { -webkit-overflow-scrolling: touch; }
+}
+@media (max-width: 520px) {
+  .cartao { padding: 18px 16px; }
+  .login-cartao { padding: 30px 22px; }
+  .valor-cartao .valor { font-size: 26px; }
+}
