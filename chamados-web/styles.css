@@ -136,8 +136,9 @@ h1, h2, h3 { font-family: var(--serifa); font-weight: 700; letter-spacing: -.01e
 }
 .lateral-marca { padding: 4px 8px 16px; color: #F4F1E8; }
 .lateral-marca strong {
-  display: block; margin-top: 10px;
+  display: block; margin-top: 10px; padding-bottom: 8px;
   font-family: var(--serifa); font-size: 16px; letter-spacing: -.01em;
+  border-bottom: 2px solid var(--amarelo-marca);
 }
 .topo-logo { height: 34px; width: auto; display: block; }
 .topo-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow-y: auto; }
@@ -158,6 +159,18 @@ h1, h2, h3 { font-family: var(--serifa); font-weight: 700; letter-spacing: -.01e
   border-left-color: var(--amarelo-marca);
   background: rgba(249, 176, 49, .13);
 }
+/* "Novo chamado" e o CTA da marca: pill amarela solida na lateral (design
+   Stitch), com texto verde-escuro. Vale tambem quando e a rota ativa. */
+.topo-nav a[href="#/novo"],
+.topo-nav a[href="#/novo"].ativo {
+  background: var(--amarelo-marca);
+  color: #1c2b22;
+  border-left-color: transparent;
+  border-radius: 3px;
+  margin: 8px 0;
+  font-weight: 700;
+}
+.topo-nav a[href="#/novo"]:hover { background: #e09e20; color: #1c2b22; }
 .lateral-rodape {
   border-top: 1px solid rgba(255, 255, 255, .14);
   padding-top: 12px; margin-top: 10px;
