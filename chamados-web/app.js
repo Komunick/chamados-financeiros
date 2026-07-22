@@ -45,6 +45,12 @@
 
   // ------------------------------------------------------------------ helpers
   const fmtMoeda = (cent) => (cent / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  // Valor monetário nas tabelas: serifa e alinhado à direita (assinatura do
+  // design editorial). Aceita centavos (número) ou um texto já formatado.
+  const dinheiro = (v) => el('span', { class: 'dinheiro' }, typeof v === 'number' ? fmtMoeda(v) : v);
+  // Cabeçalho de coluna monetária (alinha à direita, como o corpo da coluna).
+  const ehColunaValor = (h) => /^(valor|saldo|total|já pago|restante)/i.test(String(h));
+  const thCabecalho = (h) => el('th', ehColunaValor(h) ? { class: 'th-num' } : null, h);
   const fmtData = (iso) => {
     if (!iso) return '—';
     const d = new Date(iso);
@@ -277,26 +283,51 @@
     renderRota();
   }
 
+  // Ícones da navegação (SVG inline, traço na cor do texto — sem fonte externa).
+  const NAV_ICONE = (d) => '<svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
+  const NAV_ICONES = {
+    '#/viagens': NAV_ICONE('<rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>'),
+    '#/colaborador': NAV_ICONE('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'),
+    '#/compras': NAV_ICONE('<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>'),
+    '#/novo': NAV_ICONE('<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>'),
+    '#/historico': NAV_ICONE('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'),
+    '#/telefones': NAV_ICONE('<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>'),
+    '#/relatorios': NAV_ICONE('<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>'),
+    '#/notificacoes': NAV_ICONE('<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>'),
+    '#/auditoria': NAV_ICONE('<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'),
+    '#/usuarios': NAV_ICONE('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
+  };
+
   function montarNav() {
     const nav = $('#topo-nav');
     nav.innerHTML = '';
+    // '-' marca um rótulo de seção (Ações / Registros / Sistema), como no
+    // design editorial da barra lateral.
     const links = [
       ['#/viagens', 'Transporte'],
       // Viagens de colaborador são restritas ao financeiro/admin.
       ...(ehFinanceiro() ? [['#/colaborador', 'Colaborador']] : []),
       ['#/compras', 'Compras'],
+      ['-', 'Ações'],
       ['#/novo', 'Novo chamado'],
+      ['-', 'Registros'],
       ['#/historico', 'Histórico'],
       ['#/telefones', 'Telefones'],
       // Relatórios abertos a todos: é por eles que o solicitante acessa as viagens.
       ['#/relatorios', 'Relatórios'],
     ];
-    if (ehFinanceiro()) links.push(['#/notificacoes', 'Notificações']);
-    if (ehFinanceiro()) links.push(['#/auditoria', 'Auditoria']);
-    if (ehAdmin()) links.push(['#/usuarios', 'Usuários']);
+    const sistema = [];
+    if (ehFinanceiro()) sistema.push(['#/notificacoes', 'Notificações']);
+    if (ehFinanceiro()) sistema.push(['#/auditoria', 'Auditoria']);
+    if (ehAdmin()) sistema.push(['#/usuarios', 'Usuários']);
+    if (sistema.length) links.push(['-', 'Sistema'], ...sistema);
     const atual = navAtual();
     for (const [href, rotulo] of links) {
-      const a = el('a', { href }, rotulo);
+      if (href === '-') {
+        nav.append(el('span', { class: 'nav-grupo' }, rotulo));
+        continue;
+      }
+      const a = el('a', { href, html: NAV_ICONES[href] || '' }, el('span', null, rotulo));
       const ativo = atual === href.slice(1) ||
         (href === '#/viagens' && atual === '/chamados') ||
         (href === '#/novo' && atual.startsWith('/novo'));
@@ -345,7 +376,7 @@
         c.condutor ? c.condutor.nome : '—',
         c.rota || '—',
         fmtDataViagem(c.dataViagem),
-        fmtMoeda(c.valorTotalCent),
+        dinheiro(c.valorTotalCent),
         chipStatus(c.status),
         el('span', { class: 'mudo' }, fmtData(c.criadoEm)),
       ];
@@ -356,7 +387,7 @@
         c.solicitante.nome,
         resumoChamado(c),
         (c.compra && c.compra.fornecedor) || '—',
-        fmtValorChamado(c),
+        dinheiro(fmtValorChamado(c)),
         chipStatus(c.status),
         el('span', { class: 'mudo' }, fmtData(c.criadoEm)),
       ];
@@ -369,7 +400,7 @@
         c.colaborador ? c.colaborador.destino : '',
         c.colaborador ? fmtDataViagem(c.colaborador.dataIda) : '—',
         (c.colaborador && c.colaborador.dataVolta) ? fmtDataViagem(c.colaborador.dataVolta) : '—',
-        fmtValorChamado(c),
+        dinheiro(fmtValorChamado(c)),
         chipStatus(c.status),
         el('span', { class: 'mudo' }, fmtData(c.criadoEm)),
       ];
@@ -382,13 +413,13 @@
         resumoChamado(c),
         c.tipo === 'compra' || c.tipo === 'colaborador' ? '—' : (c.rota || '—'),
         c.tipo === 'compra' ? '—' : fmtDataViagem(c.dataViagem),
-        fmtValorChamado(c),
+        dinheiro(fmtValorChamado(c)),
         chipStatus(c.status),
         el('span', { class: 'mudo' }, fmtData(c.criadoEm)),
       ];
     }
     const tabela = el('table', { class: 'lista' },
-      el('thead', null, el('tr', null, ...cabecalhos.map((h) => el('th', null, h)))));
+      el('thead', null, el('tr', null, ...cabecalhos.map(thCabecalho))));
     const tbody = el('tbody');
     for (const c of lista) {
       const tr = el('tr', { onclick: () => { location.hash = '#/chamado/' + c.id; } });
@@ -710,7 +741,7 @@
     };
     const montarTabela = (cabecalhos, linhas) => {
       const t = el('table', { class: 'lista' },
-        el('thead', null, el('tr', null, ...cabecalhos.map((h) => el('th', null, h)))));
+        el('thead', null, el('tr', null, ...cabecalhos.map(thCabecalho))));
       const tb = el('tbody');
       for (const l of linhas) tb.append(l);
       t.append(tb);
@@ -747,7 +778,7 @@
       if (!viagens.length) { corpo.append(el('div', { class: 'vazio' }, 'Nenhuma viagem registrada.')); return; }
       corpo.append(porDia(viagens,
         ['Nº', 'Rota', 'Solicitante', 'Veículo', 'Condutor', 'Valor', 'Status'],
-        (c) => [el('strong', null, c.id), c.rota || '—', c.solicitante, c.descricao, c.condutor || '—', fmtMoeda(c.valorTotalCent), chipStatus(c.status)]));
+        (c) => [el('strong', null, c.id), c.rota || '—', c.solicitante, c.descricao, c.condutor || '—', dinheiro(c.valorTotalCent), chipStatus(c.status)]));
       return;
     }
 
@@ -759,7 +790,7 @@
       if (!compras.length) { corpo.append(el('div', { class: 'vazio' }, 'Nenhuma compra registrada.')); return; }
       corpo.append(porDia(compras,
         ['Nº', 'Solicitante', 'Descrição', 'Fornecedor', 'Valor', 'Status'],
-        (c) => [el('strong', null, c.id), c.solicitante, (c.quantidade > 1 ? c.quantidade + '× ' : '') + c.descricao, c.fornecedor || '—', fmtMoeda(c.valorTotalCent), chipStatus(c.status)]));
+        (c) => [el('strong', null, c.id), c.solicitante, (c.quantidade > 1 ? c.quantidade + '× ' : '') + c.descricao, c.fornecedor || '—', dinheiro(c.valorTotalCent), chipStatus(c.status)]));
       return;
     }
 
@@ -788,7 +819,7 @@
             c.rota || '—',
             c.solicitante,
             c.descricao,
-            fmtMoeda(c.saldoCent),
+            dinheiro(c.saldoCent),
             situacao(c),
           ]))));
         return bloco;
@@ -831,9 +862,9 @@
         chipTipo(c.tipo),
         c.descricao,
         c.solicitante,
-        fmtMoeda(c.valorTotalCent),
-        fmtMoeda(pagoCent(c)),
-        el('strong', null, fmtMoeda(restanteCent(c))),
+        dinheiro(c.valorTotalCent),
+        dinheiro(pagoCent(c)),
+        el('strong', { class: 'dinheiro' }, fmtMoeda(restanteCent(c))),
         chipStatus(c.status),
       ]))));
   }
@@ -1783,7 +1814,10 @@
   async function iniciarApp() {
     $('#tela-login').classList.add('oculto');
     $('#tela-app').classList.remove('oculto');
-    $('#usuario-nome').textContent = state.usuario.nome + ' (' + state.usuario.papel + ')';
+    $('#usuario-nome').textContent = state.usuario.nome;
+    $('#usuario-papel').textContent = state.usuario.papel;
+    $('#usuario-avatar').textContent = String(state.usuario.nome || '?')
+      .trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
     $('#sino').classList.toggle('oculto', !ehFinanceiro());
     if (ehFinanceiro()) {
       atualizarSino();

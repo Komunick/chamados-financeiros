@@ -1,20 +1,29 @@
-/* Brazil Transports — Chamados Financeiros — estilos (design Editorial) */
-/* Paleta da marca (site novo.braziltransports.com.br):
-   verde #13512E · escuro #1c2b22 · amarelo #f9b031 · claro #ebf1f2 · cinza #52595a
-   Estética editorial: papel quente, serifa nos títulos e números, filetes
-   finos (hairlines) no lugar de sombras, rótulos em caixa-alta espaçada. */
+/* Brazil Transports — Chamados Financeiros — design editorial (porte Stitch)
+   ---------------------------------------------------------------------------
+   Estética "papel timbrado" corporativo: fundo papel quente, cartões #fffefb
+   com filete de 1px no lugar de sombras, cantos discretos (3px), rótulos em
+   caixa-alta espaçada e SERIFA nos títulos e valores (assinatura da marca).
+   Sidebar fixa de 240px em verde-floresta #13512E com o amarelo #f9b031
+   reservado a destaques e ao estado ativo da navegação. */
+
 :root {
+  /* papel e tinta */
   --fundo: #f7f6f1;
   --cartao: #fffefb;
   --tinta: #1c2b22;
   --mudo: #5d6660;
   --borda: #e4e1d6;
   --filete: #d5d1c2;
-  --primario: #13512E;
+  --banda: #f2f0e9;          /* faixas de agrupamento (relatórios) */
+  --hover-linha: #f4f7f5;    /* linha de tabela sob o cursor */
+  --campo: #ffffff;
+  /* marca */
+  --primario: #13512E;       /* verde-floresta */
   --primario-escuro: #0d3a20;
   --primario-fundo: #e9f0ea;
   --amarelo-marca: #f9b031;
   --amarelo-marca-fundo: #fbf3e2;
+  /* semânticas (pills de status) */
   --verde: #15803d;
   --verde-fundo: #e2f2e6;
   --amarelo: #96650f;
@@ -23,15 +32,22 @@
   --laranja-fundo: #f9e9dd;
   --vermelho: #a32222;
   --vermelho-fundo: #f8e5e5;
-  --campo: #ffffff;
+  /* lateral: verde-floresta constante nos dois temas */
+  --lateral: #13512E;
+  --lateral-ativo: #0d3a20;
+  --lateral-texto: #e9f0ea;
+  --lateral-mudo: rgba(233, 240, 234, .62);
+  /* tipografia e forma */
   --serifa: Georgia, "Times New Roman", "Palatino Linotype", serif;
+  --sans: "Segoe UI", system-ui, -apple-system, sans-serif;
   --sombra: 0 1px 2px rgba(28, 43, 34, .05);
   --raio: 3px;
 }
 
 /* ---------- modo escuro ----------
-   Ativado com data-tema="escuro" no <html> (botão no topo / tela de login;
-   preferência salva no navegador, padrão segue o sistema operacional). */
+   Ativado com data-tema="escuro" no <html> (preferência salva no navegador;
+   sem escolha, segue o sistema). Papel vira um tom escuro quente; a lateral
+   permanece no verde-floresta da marca. */
 [data-tema="escuro"] {
   --fundo: #121613;
   --cartao: #1a201b;
@@ -40,6 +56,8 @@
   --mudo: #98a39a;
   --borda: #2f3831;
   --filete: #3d473e;
+  --banda: #20261f;
+  --hover-linha: #212a22;
   --primario: #6fbe93;
   --primario-escuro: #0d3a20;
   --primario-fundo: #1e2f25;
@@ -67,12 +85,14 @@
 [data-tema="escuro"] .toast.toast-erro { color: #16201a; border-left-color: #16201a; }
 [data-tema="escuro"] .toast.toast-notif { color: #f7f6f1; }
 [data-tema="escuro"] .anexo-mini .remover { color: #16201a; }
-/* Logomarca branca sobre fundos escuros (a da barra lateral ja e branca). */
+/* Logomarca branca sobre fundos escuros (a da barra lateral já é branca). */
 [data-tema="escuro"] .login-logo { content: url("logo-white.png"); }
+
+/* ---------- base ---------- */
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body {
-  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-family: var(--sans);
   background: var(--fundo);
   color: var(--tinta);
   font-size: 15px;
@@ -90,7 +110,7 @@ h1, h2, h3 { font-family: var(--serifa); font-weight: 700; letter-spacing: -.01e
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--primario-escuro);
+  background: var(--lateral);
   border-top: 4px solid var(--amarelo-marca);
   padding: 16px;
 }
@@ -118,103 +138,159 @@ h1, h2, h3 { font-family: var(--serifa); font-weight: 700; letter-spacing: -.01e
 }
 .login-cartao label { display: block; text-align: left; margin-bottom: 14px; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
 .login-cartao input { margin-top: 5px; }
+.tema-link {
+  background: none; border: none; cursor: pointer; font: inherit;
+  font-size: 12px; color: var(--mudo); margin-top: 16px;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.tema-link:hover { color: var(--primario); }
 
-/* ---------- barra lateral (navegação vertical) ----------
-   Verde profundo da marca nos dois temas, com o amarelo marcando a aba
-   ativa — mesma linguagem do Controle Patrimonial. */
-.app-grade { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+/* ---------- barra lateral fixa (240px, verde-floresta) ---------- */
+.app-grade { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
 .lateral {
-  background: var(--primario-escuro);
-  border-top: 4px solid var(--amarelo-marca);
+  background: var(--lateral);
   display: flex;
   flex-direction: column;
-  padding: 16px 12px;
   position: sticky;
   top: 0;
   height: 100vh;
   z-index: 20;
 }
-.lateral-marca { padding: 4px 8px 16px; color: #F4F1E8; }
-.lateral-marca strong {
-  display: block; margin-top: 10px; padding-bottom: 8px;
-  font-family: var(--serifa); font-size: 16px; letter-spacing: -.01em;
+.lateral-marca {
+  padding: 22px 20px 16px;
+  color: #fff;
   border-bottom: 2px solid var(--amarelo-marca);
 }
-.topo-logo { height: 34px; width: auto; display: block; }
-.topo-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow-y: auto; }
+.topo-logo { height: 30px; width: auto; display: block; }
+.lateral-marca strong {
+  display: block;
+  margin-top: 12px;
+  font-family: var(--serifa);
+  font-size: 18px;
+  line-height: 1.25;
+  letter-spacing: -.01em;
+  font-weight: 700;
+}
+.lateral-sub {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .18em;
+  color: var(--lateral-mudo);
+}
+.topo-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nav-grupo {
+  margin: 14px 12px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .16em;
+  color: rgba(233, 240, 234, .42);
+}
 .topo-nav a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   text-decoration: none;
-  color: #C9DACD;
+  color: rgba(233, 240, 234, .85);
   padding: 10px 12px;
-  font-weight: 600;
-  font-size: 12.5px;
+  font-weight: 700;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: .08em;
   border-left: 3px solid transparent;
   border-radius: 2px;
 }
+.topo-nav a svg { flex: none; opacity: .75; }
 .topo-nav a:hover { color: #fff; background: rgba(255, 255, 255, .07); }
+.topo-nav a:hover svg { opacity: 1; }
 .topo-nav a.ativo {
-  color: #fff;
+  color: var(--amarelo-marca);
   border-left-color: var(--amarelo-marca);
-  background: rgba(249, 176, 49, .13);
+  background: var(--lateral-ativo);
 }
-/* "Novo chamado" e o CTA da marca: pill amarela solida na lateral (design
-   Stitch), com texto verde-escuro. Vale tambem quando e a rota ativa. */
+.topo-nav a.ativo svg { opacity: 1; }
+/* "Novo chamado" é o CTA da marca: bloco amarelo sólido com texto
+   verde-escuro (design Stitch) — inclusive quando é a rota ativa. */
 .topo-nav a[href="#/novo"],
 .topo-nav a[href="#/novo"].ativo {
   background: var(--amarelo-marca);
-  color: #1c2b22;
+  color: #13512E;
   border-left-color: transparent;
-  border-radius: 3px;
-  margin: 8px 0;
-  font-weight: 700;
+  border-radius: var(--raio);
+  margin: 2px 0;
+  font-weight: 800;
 }
-.topo-nav a[href="#/novo"]:hover { background: #e09e20; color: #1c2b22; }
+.topo-nav a[href="#/novo"] svg { opacity: 1; }
+.topo-nav a[href="#/novo"]:hover { background: #e09e20; color: #0d3a20; }
 .lateral-rodape {
-  border-top: 1px solid rgba(255, 255, 255, .14);
-  padding-top: 12px; margin-top: 10px;
-  display: flex; flex-direction: column; gap: 10px;
+  border-top: 1px solid rgba(255, 255, 255, .16);
+  background: rgba(0, 0, 0, .14);
+  padding: 14px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
-.lateral-usuario { display: flex; align-items: center; gap: 10px; font-size: 13px; min-width: 0; }
-.lateral-usuario .mudo { color: #C9DACD; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lateral-acoes { display: flex; gap: 8px; }
-.lateral-acoes .btn {
-  flex: 1;
-  background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .18);
-  color: #E8F0EA;
+.lateral-usuario { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.avatar {
+  width: 32px; height: 32px; border-radius: 999px;
+  background: var(--amarelo-marca); color: #13512E;
+  font-size: 12px; font-weight: 800;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: none;
 }
-.lateral-acoes .btn:hover { background: rgba(255, 255, 255, .13); border-color: rgba(255, 255, 255, .34); }
-.lateral-acoes .btn-tema { flex: 0 0 auto; }
-.sino { cursor: pointer; position: relative; color: #C9DACD; display: inline-flex; align-items: center; }
+.lateral-usuario-texto { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+#usuario-nome {
+  color: #fff; font-size: 12.5px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#usuario-papel {
+  color: var(--lateral-mudo); font-size: 10px;
+  text-transform: uppercase; letter-spacing: .1em;
+}
+.lateral-acoes { display: flex; align-items: center; gap: 2px; }
+.btn-icone, .sino {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: var(--raio);
+  color: rgba(233, 240, 234, .85);
+  cursor: pointer; font-size: 14px; line-height: 1; padding: 0;
+}
+.btn-icone:hover, .sino:hover { background: rgba(255, 255, 255, .14); color: #fff; }
+.sino { position: relative; }
 .sino:hover { color: var(--amarelo-marca); }
 .sino svg { display: block; }
 .sino-badge {
-  position: absolute; top: -7px; right: -9px;
-  background: var(--vermelho); color: #fff;
-  font-size: 10px; font-weight: 700;
+  position: absolute; top: -3px; right: -3px;
+  background: var(--amarelo-marca); color: #13512E;
+  font-size: 9px; font-weight: 800;
   border-radius: 999px; padding: 1px 5px;
 }
 
-/* Telas estreitas (celular): a barra vira um topo horizontal compacto. */
-@media (max-width: 860px) {
-  .app-grade { grid-template-columns: 1fr; }
-  .lateral {
-    position: static; height: auto;
-    flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px 14px;
-    padding: 10px 14px;
-  }
-  .lateral-marca { padding: 0; display: flex; align-items: center; gap: 10px; }
-  .lateral-marca strong { margin-top: 0; font-size: 14px; }
-  .topo-logo { height: 26px; }
-  .topo-nav { flex-direction: row; flex-wrap: wrap; overflow: visible; }
-  .topo-nav a { padding: 7px 10px; border-left: none; border-bottom: 3px solid transparent; }
-  .topo-nav a.ativo { border-left-color: transparent; border-bottom-color: var(--amarelo-marca); }
-  .lateral-rodape { border-top: none; padding-top: 0; margin: 0 0 0 auto; flex-direction: row; align-items: center; }
+/* Hambúrguer (só aparece no celular; a lateral vira gaveta) */
+.btn-menu {
+  display: none;
+  position: fixed; top: 12px; left: 12px; z-index: 55;
+  width: 42px; height: 42px;
+  align-items: center; justify-content: center;
+  background: var(--lateral); color: #fff;
+  border: none; border-radius: var(--raio);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .28);
+  cursor: pointer;
 }
+.menu-fundo { display: none; }
 
-/* ---------- estrutura ---------- */
-.conteudo { max-width: 1120px; margin: 0 auto; padding: 28px 24px 64px; }
+/* ---------- estrutura do conteúdo ---------- */
+.conteudo { max-width: 1240px; margin: 0 auto; padding: 32px 32px 64px; min-width: 0; width: 100%; }
 .cartao {
   background: var(--cartao);
   border: 1px solid var(--borda);
@@ -222,12 +298,20 @@ h1, h2, h3 { font-family: var(--serifa); font-weight: 700; letter-spacing: -.01e
   box-shadow: var(--sombra);
   padding: 26px 28px;
 }
-.linha-topo { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.linha-topo { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 .linha-topo h2 {
   margin: 0;
-  font-size: 24px;
-  padding-bottom: 10px;
-  border-bottom: 3px double var(--filete);
+  font-size: 29px;
+  letter-spacing: -.02em;
+  padding-bottom: 12px;
+  position: relative;
+}
+/* filete duplo curto sob o título — cabeçalho editorial do Stitch */
+.linha-topo h2::after {
+  content: '';
+  position: absolute; left: 0; bottom: 0;
+  width: 64px;
+  border-bottom: 4px double var(--primario);
 }
 
 /* ---------- formulários ---------- */
@@ -248,14 +332,14 @@ input:focus, select:focus, textarea:focus {
 /* Campo calculado pelo sistema (ex.: total da compra = qtde × unitário) */
 input[readonly] { background: var(--fundo); color: var(--mudo); cursor: default; }
 input[readonly]:focus { border-color: var(--borda); box-shadow: none; }
-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--tinta); }
+label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--tinta); }
 .form-grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
 .form-grade label { display: block; }
 .form-grade input, .form-grade select { margin-top: 5px; }
 .form-secao {
   margin: 0 0 12px;
-  font-family: "Segoe UI", system-ui, sans-serif;
-  font-size: 12px;
+  font-family: var(--sans);
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .12em;
@@ -268,38 +352,42 @@ label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spa
 .form-secao:not(:first-child) { margin-top: 26px; }
 fieldset { border: none; margin: 0; padding: 0; }
 
-/* ---------- seletor de tipo de chamado ---------- */
-.tipo-escolha { display: flex; gap: 12px; flex-wrap: wrap; }
+/* ---------- seletor de tipo de chamado (abas do Stitch) ---------- */
+.tipo-escolha {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--filete);
+}
 .tipo-btn {
-  border: 1px solid var(--borda);
-  border-radius: var(--raio);
-  background: var(--campo);
+  border: none;
+  background: none;
   color: var(--mudo);
   font: inherit;
-  font-weight: 600;
-  font-size: 13px;
+  font-weight: 700;
+  font-size: 12px;
   text-transform: uppercase;
-  letter-spacing: .06em;
-  padding: 12px 22px;
+  letter-spacing: .08em;
+  padding: 11px 16px;
   cursor: pointer;
-  border-bottom: 3px solid var(--borda);
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
 }
-.tipo-btn:hover { border-color: var(--primario); color: var(--tinta); }
+.tipo-btn:hover { color: var(--tinta); }
 .tipo-btn.ativo {
-  border-color: var(--primario);
-  border-bottom-color: var(--amarelo-marca);
-  background: var(--primario-fundo);
   color: var(--primario);
+  border-bottom-color: var(--amarelo-marca);
+  background: var(--amarelo-marca-fundo);
 }
 
 /* ---------- botões ---------- */
 .btn {
   border: 1px solid var(--borda);
   border-radius: var(--raio);
-  padding: 9px 18px;
+  padding: 10px 16px;
   font: inherit;
-  font-weight: 600;
-  font-size: 13.5px;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
   cursor: pointer;
   background: var(--cartao);
   color: var(--tinta);
@@ -314,61 +402,63 @@ fieldset { border: none; margin: 0; padding: 0; }
 .btn-perigo { background: var(--campo); border-color: var(--vermelho); color: var(--vermelho); }
 .btn-perigo:hover { background: var(--vermelho-fundo); }
 .btn-largo { width: 100%; }
-.btn-mini { padding: 4px 10px; font-size: 12.5px; }
+.btn-mini { padding: 5px 10px; font-size: 11px; }
 .btn-tema { padding: 6px 10px; font-size: 15px; line-height: 1; }
-.tema-link {
-  background: none; border: none; cursor: pointer; font: inherit;
-  font-size: 12px; color: var(--mudo); margin-top: 16px;
-  text-decoration: underline; text-underline-offset: 3px;
-}
-.tema-link:hover { color: var(--primario); }
 
-/* ---------- lista de chamados ---------- */
+/* ---------- lista de chamados (folha de dados) ---------- */
 .filtros { display: flex; gap: 10px; margin: 4px 0 18px; flex-wrap: wrap; }
 .filtros input, .filtros select { width: auto; min-width: 200px; }
 .tabela-envolta { overflow-x: auto; }
-table.lista { width: 100%; border-collapse: collapse; }
-table.lista th, table.lista td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--borda); white-space: nowrap; }
+table.lista { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.lista th, table.lista td { text-align: left; padding: 10px 10px; border-bottom: 1px solid var(--borda); white-space: nowrap; }
 table.lista th {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: .1em;
-  color: var(--mudo);
-  border-bottom: 2px solid var(--tinta);
-}
-table.lista tbody tr { cursor: pointer; }
-table.lista tbody tr:hover { background: var(--primario-fundo); }
-.vazio { text-align: center; padding: 44px 10px; color: var(--mudo); font-family: var(--serifa); font-style: italic; }
-table.lista td.aud-detalhe { white-space: normal; min-width: 240px; max-width: 460px; }
-
-/* ---------- chips de status e tipo (etiquetas tipográficas) ---------- */
-.chip {
-  display: inline-block;
-  padding: 2px 9px;
-  border-radius: 2px;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: .07em;
-  border: 1px solid currentColor;
+  letter-spacing: .1em;
+  color: var(--tinta);
+  border-bottom: 2px solid var(--primario);
 }
-.chip-aberto { background: var(--primario-fundo); color: var(--primario); }
+table.lista th.th-num { text-align: right; }
+table.lista tbody tr { cursor: pointer; }
+table.lista tbody tr:hover { background: var(--hover-linha); }
+/* números (Nº do chamado) e valores em serifa — assinatura editorial */
+table.lista td strong { font-family: var(--serifa); font-weight: 600; letter-spacing: .01em; }
+.dinheiro { display: block; text-align: right; font-family: var(--serifa); font-weight: 600; }
+strong.dinheiro { font-weight: 700; }
+.vazio { text-align: center; padding: 44px 10px; color: var(--mudo); font-family: var(--serifa); font-style: italic; }
+table.lista td.aud-detalhe { white-space: normal; min-width: 240px; max-width: 460px; }
+
+/* ---------- pills de status e tipo (totalmente arredondadas) ---------- */
+.chip {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  line-height: 1.4;
+  border: 1px solid currentColor;
+  border-color: color-mix(in srgb, currentColor 32%, transparent);
+}
+.chip-aberto { background: var(--verde-fundo); color: var(--verde); }
 .chip-adiantamento_pago { background: var(--amarelo-fundo); color: var(--amarelo); }
 .chip-viagem_encerrada { background: var(--laranja-fundo); color: var(--laranja); }
-.chip-finalizado { background: var(--verde-fundo); color: var(--verde); }
+.chip-finalizado { background: var(--primario-fundo); color: var(--primario); }
 .chip-cancelado { background: var(--vermelho-fundo); color: var(--vermelho); }
 .chip-pendente { background: var(--amarelo-fundo); color: var(--amarelo); }
 .chip-pago { background: var(--verde-fundo); color: var(--verde); }
-.chip-tipo-viagem { background: transparent; color: var(--primario); }
-.chip-tipo-compra { background: transparent; color: var(--amarelo); }
-.chip-tipo-colaborador { background: transparent; color: var(--laranja); }
+.chip-tipo-viagem { background: var(--primario-fundo); color: var(--primario); }
+.chip-tipo-compra { background: var(--amarelo-marca-fundo); color: var(--amarelo); }
+.chip-tipo-colaborador { background: var(--laranja-fundo); color: var(--laranja); }
 .chip-futuro { background: var(--amarelo-marca-fundo); color: var(--amarelo); border-style: dashed; }
 
 /* ---------- abas ---------- */
-.abas { display: flex; gap: 2px; border-bottom: 1px solid var(--tinta); margin: 20px 0 22px; flex-wrap: wrap; }
+.abas { display: flex; gap: 2px; border-bottom: 1px solid var(--filete); margin: 20px 0 22px; flex-wrap: wrap; }
 .aba {
-  border: none; background: none; font: inherit; font-weight: 600;
-  font-size: 12.5px; text-transform: uppercase; letter-spacing: .08em;
+  border: none; background: none; font: inherit; font-weight: 700;
+  font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
   padding: 10px 16px; cursor: pointer; color: var(--mudo);
   border-bottom: 3px solid transparent; margin-bottom: -1px;
 }
@@ -377,31 +467,56 @@ table.lista td.aud-detalhe { white-space: normal; min-width: 240px; max-width: 4
 
 /* ---------- financeiro (adiantamento/saldo) ---------- */
 .valores { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
-.valor-cartao { border: 1px solid var(--borda); border-top: 3px solid var(--filete); border-radius: var(--raio); padding: 18px; background: var(--campo); }
+.valor-cartao {
+  border: 1px solid var(--borda);
+  border-top: 3px solid var(--filete);
+  border-radius: var(--raio);
+  padding: 16px 18px;
+  background: var(--cartao);
+}
 .valor-cartao .rotulo { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--mudo); font-weight: 700; }
-.valor-cartao .valor { font-family: var(--serifa); font-size: 30px; font-weight: 700; margin: 8px 0; letter-spacing: -.01em; }
-.valor-cartao.destaque { border-top-color: var(--amarelo-marca); background: var(--primario-fundo); }
+.valor-cartao .valor { font-family: var(--serifa); font-size: 28px; font-weight: 700; margin: 8px 0; letter-spacing: -.01em; }
+.valor-cartao.destaque { border-top-color: var(--amarelo-marca); }
+.valor-cartao.destaque .rotulo { color: var(--amarelo); }
 .valor-cartao .obs { font-size: 13px; color: var(--mudo); }
 .acoes-status { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
 .aviso-lembrete {
   margin-top: 18px; padding: 12px 16px; border-radius: var(--raio);
   background: var(--amarelo-fundo); color: var(--amarelo);
+  border: 1px solid color-mix(in srgb, var(--amarelo-marca) 45%, transparent);
   border-left: 3px solid var(--amarelo-marca); font-size: 14px;
 }
 
 /* ---------- relatórios ---------- */
-.relatorio-dia { margin-top: 28px; border-top: 1px solid var(--tinta); padding-top: 16px; }
-.relatorio-dia-topo { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
-.relatorio-dia-topo h3 { margin: 0; font-size: 18px; }
-.relatorio-total {
-  font-family: var(--serifa);
+.relatorio-dia { margin-top: 26px; }
+.relatorio-dia-topo {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  background: var(--banda);
+  border: 1px solid var(--borda);
+  border-radius: var(--raio);
+  padding: 8px 14px;
+  margin-bottom: 10px;
+}
+.relatorio-dia-topo h3 {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 12px;
   font-weight: 700;
-  font-size: 16px;
-  color: var(--primario);
-  background: var(--primario-fundo);
-  border: 1px solid var(--primario);
-  padding: 5px 14px;
-  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--tinta);
+}
+.relatorio-total {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--verde);
+  background: var(--verde-fundo);
+  border: 1px solid color-mix(in srgb, var(--verde) 35%, transparent);
+  padding: 4px 14px;
+  border-radius: 999px;
 }
 .relatorio-detalhe { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; }
 
@@ -428,8 +543,8 @@ table.lista td.aud-detalhe { white-space: normal; min-width: 240px; max-width: 4
 .dados-grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; }
 .dados-bloco h4 {
   margin: 0 0 8px;
-  font-family: "Segoe UI", system-ui, sans-serif;
-  font-size: 12px;
+  font-family: var(--sans);
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .1em;
@@ -458,7 +573,7 @@ table.lista td.aud-detalhe { white-space: normal; min-width: 240px; max-width: 4
 .notif .quando { font-size: 12px; color: var(--mudo); text-transform: uppercase; letter-spacing: .05em; }
 .notif .mensagem { margin: 6px 0 10px; }
 
-/* ---------- prévia 70/30 no formulário ---------- */
+/* ---------- prévia 70/30 no formulário (resumo financeiro) ---------- */
 .previa-valores {
   margin-top: 16px; padding: 16px 18px; border-radius: var(--raio);
   background: var(--primario-fundo); border: 1px solid var(--borda);
@@ -492,29 +607,51 @@ label.com-sugestoes { position: relative; }
 .sugestao {
   display: block; width: 100%; text-align: left; padding: 8px 10px;
   border: 0; background: none; font: inherit; font-weight: 400;
+  text-transform: none; letter-spacing: normal;
   color: var(--tinta); cursor: pointer;
 }
 .sugestao:hover, .sugestao.ativo { background: var(--primario-fundo); }
 .sugestao .mudo { font-size: .85em; }
 
-@media (max-width: 640px) {
-  .conteudo { padding: 16px 12px 60px; }
-  table.lista th, table.lista td { padding: 8px; }
+/* ===================== celular: lateral vira gaveta ===================== */
+@media (max-width: 860px) {
+  .app-grade { grid-template-columns: 1fr; }
+  .btn-menu { display: inline-flex; }
+  .lateral {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: 264px; height: 100%;
+    transform: translateX(-105%);
+    transition: transform .22s ease;
+    z-index: 70;
+    overflow-y: auto;
+  }
+  body.menu-aberto .lateral { transform: none; box-shadow: 0 0 40px rgba(0, 0, 0, .45); }
+  body.menu-aberto .menu-fundo {
+    display: block;
+    position: fixed; inset: 0;
+    background: rgba(15, 25, 18, .55);
+    z-index: 60;
+  }
+  .conteudo { padding: 66px 14px 60px; }
 }
 
-/* ===================== Melhorias para celular =====================
-   Campos sem zoom automático do iOS e alvos de toque maiores. */
+@media (max-width: 640px) {
+  table.lista th, table.lista td { padding: 8px; }
+  .linha-topo h2 { font-size: 24px; }
+}
+
+/* Campos sem zoom automático do iOS e alvos de toque maiores. */
 @media (max-width: 768px) {
   input, select, textarea { font-size: 16px; }
   .btn { min-height: 44px; padding: 11px 18px; }
   .btn-mini { min-height: 34px; padding: 6px 12px; }
   .aba { padding: 11px 14px; }
-  .tipo-btn { padding: 12px 18px; flex: 1 1 auto; }
+  .tipo-btn { padding: 12px 14px; flex: 1 1 auto; }
   .filtros input, .filtros select { min-width: 0; width: 100%; }
   .tabela-envolta { -webkit-overflow-scrolling: touch; }
 }
 @media (max-width: 520px) {
   .cartao { padding: 18px 16px; }
   .login-cartao { padding: 30px 22px; }
-  .valor-cartao .valor { font-size: 26px; }
+  .valor-cartao .valor { font-size: 25px; }
 }
